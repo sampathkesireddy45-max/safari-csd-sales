@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: safari-csd-sales
+    runtime: python
+    plan: free
+    buildCommand: "chmod +x render-build.sh && ./render-build.sh"
+    startCommand: "cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: NODE_VERSION
+        value: 20.11.0
