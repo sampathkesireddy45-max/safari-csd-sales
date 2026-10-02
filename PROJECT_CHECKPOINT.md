@@ -22,6 +22,7 @@
 ---
 
 ## 2. Active Services & URLs
+- **GitHub Repository**: [https://github.com/sampathkesireddy45-max/safari-csd-sales](https://github.com/sampathkesireddy45-max/safari-csd-sales)
 - **Public Live Deployment Link**: [https://robbie-sheffield-growing-unsigned.trycloudflare.com](https://robbie-sheffield-growing-unsigned.trycloudflare.com)
 - **Frontend App**: `http://localhost:5173` (Vite dev) or unified on `http://localhost:8000`
 - **Backend API**: `http://localhost:8000` (FastAPI + SQLAlchemy + SQLite `backend/test.db`)
