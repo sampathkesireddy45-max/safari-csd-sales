@@ -8,7 +8,10 @@ from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from typing import Optional
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "safari-secret-key-2026-production")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    # Keep local development convenient without allowing a shared production key.
+    SECRET_KEY = "local-development-only-change-me"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
@@ -44,9 +47,7 @@ async def get_current_user(
         payload = jwt.decode(raw_token, SECRET_KEY, algorithms=[ALGORITHM])
         email = payload.get("sub") or payload.get("email")
     except JWTError:
-        # Fallback for plain email token in development
-        if "@" in raw_token:
-            email = raw_token
+        email = None
 
     if not email:
         raise HTTPException(

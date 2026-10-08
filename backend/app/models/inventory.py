@@ -1,10 +1,13 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from ..utils.database import Base
 import datetime
 
 class Inventory(Base):
     __tablename__ = "inventory"
+    __table_args__ = (
+        UniqueConstraint("product_id", "location_id", name="uq_inventory_product_location"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
@@ -15,4 +18,3 @@ class Inventory(Base):
     # Relationships
     product = relationship("Product", back_populates="inventory_items")
     location = relationship("Location")
-

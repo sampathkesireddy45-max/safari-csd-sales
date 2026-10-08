@@ -9,12 +9,20 @@ from .routers import auth, location, employee, product, inventory, sale, damage_
 app = FastAPI(title="Safari Sales & Stock Management System")
 
 # Configure CORS
+configured_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://localhost:8000"
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins in development
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=configured_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(auth.router)
@@ -37,6 +45,9 @@ def on_startup():
         try:
             admin = db.query(Employee).filter(Employee.role == "admin").first()
             if not admin:
+                bootstrap_password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD")
+                if os.getenv("APP_ENV", "development") == "production" and not bootstrap_password:
+                    raise RuntimeError("BOOTSTRAP_ADMIN_PASSWORD is required in production")
                 admin_user = Employee(
                     employee_id="admin",
                     email="admin@example.com",
@@ -44,19 +55,28 @@ def on_startup():
                     role="admin",
                     status="active",
                 )
-                admin_user.set_password("canteen@123")
+                admin_user.set_password(bootstrap_password or "canteen@123")
                 db.add(admin_user)
                 db.commit()
         finally:
             db.close()
+    except RuntimeError:
+        raise
     except Exception as e:
         print(f"Startup DB init notice: {e}")
 
 @app.get("/api/health")
 async def health_check():
+    database_status = "ok"
+    try:
+        with engine.connect() as connection:
+            connection.execute(__import__("sqlalchemy").text("SELECT 1"))
+    except Exception:
+        database_status = "unavailable"
     return {
         "system": "Safari Sales & Stock Management System",
-        "status": "online",
+        "status": "online" if database_status == "ok" else "degraded",
+        "database": database_status,
         "version": "2.0.0"
     }
 
@@ -85,4 +105,3 @@ else:
             "status": "online",
             "version": "2.0.0"
         }
-

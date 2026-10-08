@@ -14,7 +14,7 @@ import {
   UserCheck,
   Building2,
   Navigation,
-  Key
+  Key, BarChart3, Activity, ShoppingCart
 } from "lucide-react";
 
 const Sidebar = () => {
@@ -30,6 +30,9 @@ const Sidebar = () => {
     { label: "Staff Credentials & Pass", path: "/admin/credentials", icon: Key },
     { label: "Damage Reports & Photos", path: "/admin/damages", icon: AlertOctagon },
     { label: "Employee Directory", path: "/admin/employees", icon: Users },
+    { label: "Reports & Analytics", path: "/admin/reports", icon: BarChart3 },
+    { label: "Sales Dashboard", path: "/admin/sales", icon: ShoppingCart },
+    { label: "System Health", path: "/admin/system-health", icon: Activity },
   ];
 
   const employeeLinks = [

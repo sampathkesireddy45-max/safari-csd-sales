@@ -1,11 +1,11 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
 class InventoryBase(BaseModel):
     product_id: int
     location_id: int
-    quantity: int = 0
+    quantity: int = Field(0, ge=0)
 
 class InventoryCreate(InventoryBase):
     pass
@@ -26,6 +26,5 @@ class Inventory(InventoryInDBBase):
 class StockUpdateRequest(BaseModel):
     product_id: int
     location_id: Optional[int] = None
-    quantity: int
-    mode: str = "set"  # "set" (override count) or "add" (add incoming pieces)
-
+    quantity: int = Field(..., ge=0)
+    mode: str = Field("set", pattern="^(set|add)$")

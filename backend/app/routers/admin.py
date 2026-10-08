@@ -1,4 +1,8 @@
-from fastapi import APIRouter, Depends
+import csv
+import io
+from openpyxl import Workbook
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from .. import models, crud
@@ -12,6 +16,142 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
     dependencies=[Depends(get_current_active_admin_user)],
 )
+
+def _sales_query(db: Session, employee_id: int = None, date_from: str = None, date_to: str = None):
+    query = db.query(models.Sale).join(models.Employee).join(models.Location)
+    if employee_id:
+        query = query.filter(models.Sale.employee_id == employee_id)
+    if date_from:
+        query = query.filter(models.Sale.sale_date >= datetime.fromisoformat(date_from))
+    if date_to:
+        query = query.filter(models.Sale.sale_date < datetime.fromisoformat(date_to) + timedelta(days=1))
+    return query
+
+@router.get("/sales")
+def get_admin_sales_summary(
+    employee_id: int = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    db: Session = Depends(get_db),
+):
+    query = _sales_query(db, employee_id, date_from, date_to)
+    sales = query.order_by(models.Sale.sale_date.desc()).limit(limit).all()
+    employee_totals = db.query(
+        models.Employee.id,
+        models.Employee.employee_id,
+        models.Employee.name,
+        func.count(models.Sale.id).label("sale_count"),
+        func.coalesce(func.sum(models.Sale.total_pieces), 0).label("total_pieces"),
+    ).outerjoin(models.Sale, models.Sale.employee_id == models.Employee.id)
+    if employee_id:
+        employee_totals = employee_totals.filter(models.Employee.id == employee_id)
+    if date_from:
+        employee_totals = employee_totals.filter(models.Sale.sale_date >= datetime.fromisoformat(date_from))
+    if date_to:
+        employee_totals = employee_totals.filter(models.Sale.sale_date < datetime.fromisoformat(date_to) + timedelta(days=1))
+    employee_totals = employee_totals.group_by(models.Employee.id).order_by(func.sum(models.Sale.total_pieces).desc()).all()
+    total_pieces = query.with_entities(func.coalesce(func.sum(models.Sale.total_pieces), 0)).scalar() or 0
+    return {
+        "overall": {"sale_count": query.count(), "total_pieces": int(total_pieces)},
+        "employees": [
+            {"id": row.id, "employee_id": row.employee_id, "name": row.name, "sale_count": row.sale_count, "total_pieces": int(row.total_pieces or 0)}
+            for row in employee_totals if row.sale_count
+        ],
+        "sales": [
+            {
+                "id": sale.id,
+                "sale_date": sale.sale_date,
+                "employee_id": sale.employee_id,
+                "employee_name": sale.employee.name if sale.employee else "Unknown",
+                "location_name": sale.location.name if sale.location else "Unknown",
+                "total_pieces": int(sale.total_pieces or 0),
+                "item_count": len(sale.items),
+            }
+            for sale in sales
+        ],
+    }
+
+@router.get("/sales/export")
+def export_admin_sales(
+    employee_id: int = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db),
+):
+    sales = _sales_query(db, employee_id, date_from, date_to).order_by(models.Sale.sale_date.desc()).all()
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(["Sale ID", "Sale Date", "Sale Time", "Employee ID", "Employee", "Location", "Total Pieces", "Line Items"])
+    for sale in sales:
+        sale_date = sale.sale_date.strftime("%Y-%m-%d") if sale.sale_date else ""
+        sale_time = sale.sale_date.strftime("%H:%M:%S") if sale.sale_date else ""
+        writer.writerow([
+            sale.id,
+            sale_date,
+            sale_time,
+            sale.employee.employee_id if sale.employee else "",
+            sale.employee.name if sale.employee else "Unknown",
+            sale.location.name if sale.location else "Unknown",
+            sale.total_pieces or 0,
+            len(sale.items),
+        ])
+    output.seek(0)
+    csv_content = "\ufeff" + output.getvalue()
+    scope = f"employee_{employee_id}" if employee_id else "overall"
+    return StreamingResponse(
+        iter([csv_content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=sales_{scope}.csv"},
+    )
+
+@router.get("/sales/export/xlsx")
+def export_admin_sales_xlsx(
+    employee_id: int = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db),
+):
+    sales = _sales_query(db, employee_id, date_from, date_to).order_by(models.Sale.sale_date.desc()).all()
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Sales"
+    worksheet.append(["Sale ID", "Sale Date", "Sale Time", "Employee ID", "Employee", "Location", "Total Pieces", "Line Items"])
+    for sale in sales:
+        worksheet.append([
+            sale.id,
+            sale.sale_date.date() if sale.sale_date else None,
+            sale.sale_date.time().replace(microsecond=0) if sale.sale_date else None,
+            sale.employee.employee_id if sale.employee else "",
+            sale.employee.name if sale.employee else "Unknown",
+            sale.location.name if sale.location else "Unknown",
+            sale.total_pieces or 0,
+            len(sale.items),
+        ])
+    for cell in worksheet[1]:
+        cell.font = cell.font.copy(bold=True)
+    worksheet.freeze_panes = "A2"
+    worksheet.auto_filter.ref = worksheet.dimensions
+    worksheet.column_dimensions["A"].width = 12
+    worksheet.column_dimensions["B"].width = 14
+    worksheet.column_dimensions["C"].width = 12
+    worksheet.column_dimensions["D"].width = 14
+    worksheet.column_dimensions["E"].width = 22
+    worksheet.column_dimensions["F"].width = 18
+    worksheet.column_dimensions["G"].width = 14
+    worksheet.column_dimensions["H"].width = 12
+    for row in worksheet.iter_rows(min_row=2, min_col=2, max_col=3):
+        row[0].number_format = "yyyy-mm-dd"
+        row[1].number_format = "hh:mm:ss"
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    scope = f"employee_{employee_id}" if employee_id else "overall"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=sales_{scope}.xlsx"},
+    )
 
 @router.get("/stats")
 def get_admin_dashboard_stats(db: Session = Depends(get_db)):

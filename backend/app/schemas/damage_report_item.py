@@ -1,10 +1,10 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
 class DamageReportItemBase(BaseModel):
     product_id: int
-    quantity: int
+    quantity: int = Field(..., gt=0)
     description: Optional[str] = None
 
 class DamageReportItemCreate(DamageReportItemBase):
@@ -19,4 +19,3 @@ class DamageReportItemInDBBase(DamageReportItemBase):
 
 class DamageReportItem(DamageReportItemInDBBase):
     pass
-

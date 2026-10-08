@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Optional
 from .. import schemas, crud, models
@@ -10,6 +11,12 @@ router = APIRouter(
     tags=["inventory"],
     responses={404: {"description": "Not found"}},
 )
+
+class StockTransferRequest(BaseModel):
+    product_id: int
+    from_location_id: int
+    to_location_id: int
+    quantity: int = Field(..., gt=0)
 
 @router.post("/update-stock")
 def update_stock(
@@ -99,6 +106,37 @@ def reset_inventory_to_zero(
         "affected_records": updated_count
     }
 
+@router.post("/transfer")
+def transfer_stock(
+    req: StockTransferRequest,
+    db: Session = Depends(get_db),
+    current_user: models.Employee = Depends(get_current_active_admin_user)
+):
+    if req.from_location_id == req.to_location_id:
+        raise HTTPException(status_code=400, detail="Source and destination locations must differ")
+    source = db.query(models.Inventory).filter(
+        models.Inventory.product_id == req.product_id,
+        models.Inventory.location_id == req.from_location_id
+    ).with_for_update().first()
+    if not source or source.quantity < req.quantity:
+        raise HTTPException(status_code=409, detail="Insufficient source stock for transfer")
+    destination = db.query(models.Inventory).filter(
+        models.Inventory.product_id == req.product_id,
+        models.Inventory.location_id == req.to_location_id
+    ).with_for_update().first()
+    if not destination:
+        destination = models.Inventory(product_id=req.product_id, location_id=req.to_location_id, quantity=0)
+        db.add(destination)
+        db.flush()
+    source.quantity -= req.quantity
+    destination.quantity += req.quantity
+    db.add_all([
+        models.InventoryTransaction(inventory_id=source.id, quantity_change=-req.quantity, transaction_type="transfer", reference_type="inventory_transfer", performed_by=current_user.id),
+        models.InventoryTransaction(inventory_id=destination.id, quantity_change=req.quantity, transaction_type="transfer", reference_type="inventory_transfer", performed_by=current_user.id),
+    ])
+    db.commit()
+    return {"status": "success", "quantity": req.quantity, "from_inventory_id": source.id, "to_inventory_id": destination.id}
+
 @router.get("/")
 def read_inventories(
     location_id: Optional[int] = Query(None),
@@ -114,10 +152,12 @@ def read_inventories(
         models.Location, models.Inventory.location_id == models.Location.id
     )
 
-    if location_id:
-        items = items.filter(models.Inventory.location_id == location_id)
-    elif current_user.role != "admin" and current_user.assigned_location_id:
+    if current_user.role != "admin":
+        if not current_user.assigned_location_id:
+            return []
         items = items.filter(models.Inventory.location_id == current_user.assigned_location_id)
+    elif location_id:
+        items = items.filter(models.Inventory.location_id == location_id)
 
     results = []
     for inv, prod, loc in items.offset(skip).limit(limit).all():
@@ -140,6 +180,8 @@ def read_inventory(inventory_id: int, db: Session = Depends(get_db), current_use
     db_inventory = crud.get_inventory(db, inventory_id=inventory_id)
     if db_inventory is None:
         raise HTTPException(status_code=404, detail="Inventory not found")
+    if current_user.role != "admin" and db_inventory.location_id != current_user.assigned_location_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
     return db_inventory
 
 @router.put("/{inventory_id}", response_model=schemas.Inventory)

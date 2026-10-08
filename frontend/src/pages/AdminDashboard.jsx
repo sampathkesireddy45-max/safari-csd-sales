@@ -4,6 +4,8 @@ import {
   getAdminDashboardStats,
   getProducts,
   getLocations,
+  getAdminSalesSummary,
+  exportAdminSalesXlsx,
   resetInventoryToZero,
   markDamageReplaced
 } from "../services/api";
@@ -15,6 +17,7 @@ import AnimatedNumber from "../components/AnimatedNumber";
 import LiveEmployeeMapWidget from "../components/LiveEmployeeMapWidget";
 import { CardSkeleton, TableSkeleton } from "../components/LoadingSkeleton";
 import EmptyState from "../components/EmptyState";
+import ScrollReveal from "../components/ScrollReveal";
 import { useToast } from "../components/Toast";
 import {
   Users,
@@ -35,6 +38,7 @@ import {
   Edit3,
   RotateCcw,
   CheckCircle2
+  ,Download, FileSpreadsheet, User
 } from "lucide-react";
 
 const AdminDashboard = () => {
@@ -55,6 +59,9 @@ const AdminDashboard = () => {
   const [locations, setLocations] = useState([]);
   const [productSearch, setProductSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [salesSummary, setSalesSummary] = useState({ overall: { sale_count: 0, total_pieces: 0 }, employees: [], sales: [] });
+  const [salesLoading, setSalesLoading] = useState(true);
+  const [selectedSalesEmployee, setSelectedSalesEmployee] = useState("");
 
   // Stock Entry Modal State
   const [stockModalOpen, setStockModalOpen] = useState(false);
@@ -78,18 +85,47 @@ const AdminDashboard = () => {
 
   const fetchStats = async () => {
     try {
-      const [statsData, productsData, locationsData] = await Promise.all([
+      const [statsData, productsData, locationsData, salesData] = await Promise.all([
         getAdminDashboardStats(),
         getProducts(),
-        getLocations()
+        getLocations(),
+        getAdminSalesSummary()
       ]);
       setStats(statsData);
       setProducts(productsData || []);
       setLocations(locationsData || []);
+      setSalesSummary(salesData || { overall: { sale_count: 0, total_pieces: 0 }, employees: [], sales: [] });
     } catch (error) {
       console.error("Failed to fetch admin stats:", error);
     } finally {
       setLoading(false);
+      setSalesLoading(false);
+    }
+  };
+
+  const handleSalesEmployeeChange = async (employeeId) => {
+    setSelectedSalesEmployee(employeeId);
+    setSalesLoading(true);
+    try {
+      setSalesSummary(await getAdminSalesSummary(employeeId ? { employee_id: employeeId } : {}));
+    } catch (error) {
+      addToast(error.message || "Failed to load sales", "error");
+    } finally {
+      setSalesLoading(false);
+    }
+  };
+
+  const handleExportSales = async (employeeId = "") => {
+    try {
+      const blob = await exportAdminSalesXlsx(employeeId ? { employee_id: employeeId } : {});
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = employeeId ? `sales_employee_${employeeId}.xlsx` : "sales_overall.xlsx";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      addToast(error.message || "Sales export failed", "error");
     }
   };
 
@@ -106,6 +142,17 @@ const AdminDashboard = () => {
     setSelectedPhoto(photo);
     setLightboxOpen(true);
   };
+
+  const hasTrendData = (stats.dailyTrends || []).some(
+    (day) => Number(day.sales) > 0 || Number(day.damages) > 0
+  );
+  const setupSteps = [
+    { label: "Add a retail location", done: locations.length > 0, path: "/admin/locations" },
+    { label: "Confirm the product catalog", done: products.length > 0, path: "/admin/dashboard" },
+    { label: "Create staff access", done: stats.totalEmployees > 1, path: "/admin/employees" },
+    { label: "Enter physical stock", done: stats.totalStock > 0, path: "/admin/dashboard" },
+  ];
+  const setupComplete = setupSteps.filter((step) => step.done).length;
 
   return (
     <Layout
@@ -151,8 +198,20 @@ const AdminDashboard = () => {
           <TableSkeleton rows={5} cols={5} />
         </div>
       ) : (
+        <ScrollReveal>
         <div className="space-y-8">
           {/* Primary Operations Metrics */}
+          {setupComplete < setupSteps.length && (
+            <div className="bg-indigo-950 text-white rounded-2xl p-6 shadow-lg">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div><p className="text-xs uppercase tracking-wider text-indigo-300 font-bold">Getting started</p><h2 className="text-lg font-bold mt-1">Complete your operations setup</h2><p className="text-xs text-indigo-200 mt-1">{setupComplete} of {setupSteps.length} setup steps complete</p></div>
+                <div className="h-2 w-full sm:w-48 rounded-full bg-indigo-800 overflow-hidden"><div className="h-full bg-emerald-400 transition-all duration-300" style={{ width: `${setupComplete / setupSteps.length * 100}%` }} /></div>
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 mt-5">
+                {setupSteps.map((step) => <Link key={step.label} to={step.path} className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs ${step.done ? "bg-emerald-500/20 text-emerald-200" : "bg-white/10 text-indigo-100 hover:bg-white/20"}`}><CheckCircle2 className={`w-4 h-4 ${step.done ? "text-emerald-400" : "text-indigo-300"}`} />{step.label}</Link>)}
+              </div>
+            </div>
+          )}
           <div>
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
               Fleet Network Status
@@ -280,6 +339,92 @@ const AdminDashboard = () => {
             </div>
           </div>
 
+          {/* Overall and individual sales */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-5">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-50 rounded-xl text-emerald-600">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Sales Register</h3>
+                  <p className="text-xs text-slate-500">Overall performance and individual employee sales</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={selectedSalesEmployee}
+                  onChange={(event) => handleSalesEmployeeChange(event.target.value)}
+                  className="text-xs border border-slate-200 rounded-xl px-3 py-2 bg-white"
+                  aria-label="Filter sales by employee"
+                >
+                  <option value="">Overall sales</option>
+                  {salesSummary.employees.map((employee) => (
+                    <option key={employee.id} value={employee.id}>
+                      {employee.name} ({employee.employee_id})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => handleExportSales("")}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl"
+                >
+                  <Download className="w-3.5 h-3.5" /> Overall XLSX
+                </button>
+                {selectedSalesEmployee && (
+                  <button
+                    type="button"
+                    onClick={() => handleExportSales(selectedSalesEmployee)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-xl"
+                  >
+                    <User className="w-3.5 h-3.5" /> Individual XLSX
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+              <div className="rounded-xl bg-slate-50 border border-slate-100 p-4">
+                <p className="text-xs font-semibold text-slate-500">
+                  {selectedSalesEmployee ? "Selected employee sales" : "Overall sales"}
+                </p>
+                <p className="text-2xl font-black text-slate-900 mt-2">
+                  {salesSummary.overall.total_pieces.toLocaleString("en-IN")} <span className="text-xs font-semibold text-slate-400">PCS</span>
+                </p>
+              </div>
+              <div className="rounded-xl bg-slate-50 border border-slate-100 p-4">
+                <p className="text-xs font-semibold text-slate-500">Sale transactions</p>
+                <p className="text-2xl font-black text-slate-900 mt-2">{salesSummary.overall.sale_count.toLocaleString("en-IN")}</p>
+              </div>
+            </div>
+
+            {salesLoading ? (
+              <div className="py-8 text-center text-xs text-slate-400">Loading sales records...</div>
+            ) : salesSummary.sales.length === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-400">No sales entered yet. Sales will appear here after the first completed transaction.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead className="border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-400">
+                    <tr><th className="py-3">Date</th><th>Employee</th><th>Location</th><th>Line items</th><th className="text-right">Pieces</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {salesSummary.sales.map((sale) => (
+                      <tr key={sale.id}>
+                        <td className="py-3">{sale.sale_date ? new Date(sale.sale_date).toLocaleString() : "—"}</td>
+                        <td className="font-medium">{sale.employee_name}</td>
+                        <td>{sale.location_name}</td>
+                        <td>{sale.item_count}</td>
+                        <td className="text-right font-bold text-emerald-700">{sale.total_pieces}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
           {/* 7-Day Live Activity & Defect Velocity Chart */}
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
             <div className="flex items-center justify-between mb-4">
@@ -308,7 +453,7 @@ const AdminDashboard = () => {
               </div>
             </div>
 
-            {stats.dailyTrends && stats.dailyTrends.length > 0 ? (
+            {hasTrendData ? (
               <div className="grid grid-cols-7 gap-3 pt-4 border-t border-slate-100">
                 {stats.dailyTrends.map((day) => {
                   const maxVal = Math.max(
@@ -324,7 +469,7 @@ const AdminDashboard = () => {
                         {/* Sales Bar */}
                         <div
                           style={{ height: `${day.sales > 0 ? salesHeight : 4}%` }}
-                          className={`w-3.5 rounded-t transition-all duration-500 ${
+                          className={`chart-bar ${day.sales > 0 ? "has-value" : ""} w-3.5 rounded-t ${
                             day.sales > 0 ? "bg-emerald-500 group-hover:bg-emerald-600" : "bg-slate-100"
                           }`}
                           title={`Sales: ${day.sales} PCS`}
@@ -332,7 +477,7 @@ const AdminDashboard = () => {
                         {/* Damages Bar */}
                         <div
                           style={{ height: `${day.damages > 0 ? damagesHeight : 4}%` }}
-                          className={`w-3.5 rounded-t transition-all duration-500 ${
+                          className={`chart-bar ${day.damages > 0 ? "has-value" : ""} w-3.5 rounded-t ${
                             day.damages > 0 ? "bg-rose-500 group-hover:bg-rose-600" : "bg-slate-100"
                           }`}
                           title={`Damages: ${day.damages} PCS`}
@@ -560,6 +705,7 @@ const AdminDashboard = () => {
             )}
           </div>
         </div>
+        </ScrollReveal>
       )}
 
       {/* Lightbox Modal */}

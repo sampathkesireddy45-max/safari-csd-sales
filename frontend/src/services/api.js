@@ -1,8 +1,8 @@
-export const API_BASE_URL = import.meta.env.VITE_BACKEND_URL !== undefined
-  ? import.meta.env.VITE_BACKEND_URL
-  : (typeof window !== "undefined" && window.location.port === "5173"
-      ? "http://localhost:8000"
-      : "");
+const configuredBackendUrl = import.meta.env.VITE_BACKEND_URL?.trim();
+export const API_BASE_URL = configuredBackendUrl
+  || (typeof window !== "undefined" && window.location.port === "5173"
+    ? "http://localhost:8000"
+    : "");
 
 // Retrieve token from storage
 export const getToken = () => localStorage.getItem("safari_token");
@@ -31,7 +31,7 @@ export const fetchApi = async (endpoint, options = {}) => {
 
     if (response.status === 401) {
       // Unauthorized: clear token
-      // removeToken();
+      removeToken();
     }
 
     if (!response.ok) {
@@ -50,12 +50,24 @@ export const fetchApi = async (endpoint, options = {}) => {
     }
 
     // For file downloads
-    const contentType = response.headers.get("content-type");
-    if (contentType && (contentType.includes("text/csv") || contentType.includes("application/octet-stream"))) {
+    const contentType = response.headers.get("content-type") || "";
+    if (
+      contentType.includes("text/csv")
+      || contentType.includes("application/octet-stream")
+      || contentType.includes("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    ) {
       return await response.blob();
     }
 
-    return await response.json();
+    if (contentType.includes("application/json")) {
+      return await response.json();
+    }
+
+    const responseText = await response.text();
+    if (responseText.trimStart().startsWith("<!DOCTYPE html") || responseText.trimStart().startsWith("<html")) {
+      throw new Error("The backend returned the website page instead of an API response. Restart the backend and try again.");
+    }
+    throw new Error(`Unexpected API response (${contentType || "unknown content type"})`);
   } catch (error) {
     console.error("API call failed:", error);
     throw error;
@@ -310,6 +322,11 @@ export const updateStock = async (stockData) => {
   });
 };
 
+export const transferStock = async (transferData) => fetchApi("/inventory/transfer", {
+  method: "POST",
+  body: JSON.stringify(transferData),
+});
+
 export const resetInventoryToZero = async (locationId = null) => {
   const url = locationId ? `/inventory/reset-to-zero?location_id=${locationId}` : "/inventory/reset-to-zero";
   return await fetchApi(url, {
@@ -322,6 +339,31 @@ export const resetInventoryToZero = async (locationId = null) => {
 export const getAdminDashboardStats = async () => {
   return await fetchApi("/admin/dashboard/stats");
 };
+
+export const getAdminSalesSummary = async (params = {}) => {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") search.append(key, value);
+  });
+  return fetchApi(`/admin/dashboard/sales${search.toString() ? `?${search}` : ""}`);
+};
+
+export const exportAdminSalesCsv = async (employeeId = "") => {
+  const query = employeeId ? `?employee_id=${encodeURIComponent(employeeId)}` : "";
+  return fetchApi(`/admin/dashboard/sales/export${query}`);
+};
+
+export const exportAdminSalesXlsx = async (params = {}) => {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") search.append(key, value);
+  });
+  return fetchApi(`/admin/dashboard/sales/export/xlsx${search.toString() ? `?${search}` : ""}`);
+};
+
+export const getSystemHealth = async () => fetchApi("/api/health");
+
+export const getAdminAuditLogs = async () => fetchApi("/damages/audit-logs");
 
 export const getEmployeeDashboardStats = async (employeeId) => {
   return await fetchApi(`/employees/dashboard/${employeeId}`);

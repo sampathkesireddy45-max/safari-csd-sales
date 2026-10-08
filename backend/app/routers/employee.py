@@ -34,7 +34,10 @@ def create_employee(employee: schemas.EmployeeCreate, db: Session = Depends(get_
     ).first()
     if existing:
         raise HTTPException(status_code=400, detail="Employee with this email or ID already exists")
-    return crud.create_employee(db=db, employee=employee)
+    try:
+        return crud.create_employee(db=db, employee=employee)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 # --- Employee Live Location Broadcast (Employee or Admin) ---
 @router.post("/live-location")
@@ -136,8 +139,8 @@ def admin_reset_password(
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
-    if not reset_data.password or len(reset_data.password.strip()) < 4:
-        raise HTTPException(status_code=400, detail="Password must be at least 4 characters long")
+    if len(reset_data.password.strip()) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters long")
     emp.set_password(reset_data.password.strip())
     db.commit()
     return {

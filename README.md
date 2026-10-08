@@ -40,11 +40,11 @@ A full-stack retail management and stock telemetry system designed for military 
 
 ---
 
-## 🔑 Default Login Credentials
+## 🔑 Initial access
 
 | Role | Username / ID | Password | Access Details |
 |---|---|---|---|
-| **Admin** | `admin` | `canteen@123` | Executive dashboard, live GPS fleet map, store creation, stock piece adjustments, damage audit approval & replacement |
+| **Admin** | `admin` | Set `BOOTSTRAP_ADMIN_PASSWORD` before first startup | Executive dashboard, live GPS fleet map, store creation, stock piece adjustments, damage audit approval & replacement |
 | **Staff** | `EMP101` | *(Configured via Admin Staff page)* | Sales billing, real-time geolocation check-in, dynamic piece counting, damage photo reporting |
 
 ---

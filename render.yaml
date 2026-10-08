@@ -10,3 +10,13 @@ services:
         value: 3.12.0
       - key: NODE_VERSION
         value: 20.11.0
+      - key: APP_ENV
+        value: production
+      - key: CORS_ORIGINS
+        sync: false
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: DATABASE_URL
+        sync: false

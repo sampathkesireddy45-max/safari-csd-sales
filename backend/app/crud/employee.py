@@ -12,7 +12,9 @@ def get_employees(db: Session, skip: int = 0, limit: int = 100):
 
 def create_employee(db: Session, employee: schemas.EmployeeCreate):
     data = employee.dict()
-    password = data.pop("password", "safari123") or "safari123"
+    password = data.pop("password", None)
+    if not password or len(password.strip()) < 8:
+        raise ValueError("A password of at least 8 characters is required")
     db_employee = models.Employee(**data)
     db_employee.set_password(password)
     db.add(db_employee)

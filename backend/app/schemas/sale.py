@@ -1,11 +1,11 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
 from . import sale_item
 
 class SaleItemBase(BaseModel):
     product_id: int
-    quantity: int
+    quantity: int = Field(..., gt=0)
 
 class SaleItemCreate(SaleItemBase):
     pass
@@ -25,7 +25,7 @@ class SaleBase(BaseModel):
     location_id: int
     sale_date: Optional[datetime] = None
     total_pieces: int = 0
-    items: List[SaleItemCreate]
+    items: List[SaleItemCreate] = Field(..., min_items=1)
 
 class SaleCreate(SaleBase):
     pass

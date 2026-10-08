@@ -58,12 +58,14 @@ def create_damage_report(
 
     # Enforce current user as reporter
     damage_report.employee_id = current_user.id
-    if not damage_report.location_id and current_user.assigned_location_id:
+    if current_user.role != "admin":
+        if not current_user.assigned_location_id:
+            raise HTTPException(status_code=400, detail="You have no assigned retail location")
+        if damage_report.location_id and damage_report.location_id != current_user.assigned_location_id:
+            raise HTTPException(status_code=403, detail="Damage reports must use your assigned location")
         damage_report.location_id = current_user.assigned_location_id
     elif not damage_report.location_id:
-        # Default to first active location if unassigned
-        loc = db.query(models.Location).filter(models.Location.is_active == True).first()
-        damage_report.location_id = loc.id if loc else 1
+        raise HTTPException(status_code=400, detail="A retail location is required")
 
     return crud.create_damage_report(db=db, damage_report=damage_report, current_user_id=current_user.id)
 
@@ -291,20 +293,20 @@ def read_damage_report(damage_report_id: int, db: Session = Depends(get_db), cur
 
 @router.put("/{damage_report_id}", response_model=schemas.DamageReport)
 def update_damage_report(damage_report_id: int, damage_report: schemas.DamageReportUpdate, db: Session = Depends(get_db), current_user: Employee = Depends(get_current_active_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only administrators can amend damage reports")
     db_damage_report = crud.get_damage_report(db, damage_report_id=damage_report_id)
     if db_damage_report is None:
         raise HTTPException(status_code=404, detail="Damage report not found")
-    if current_user.role != "admin" and db_damage_report.employee_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
     return crud.update_damage_report(db, damage_report_id=damage_report_id, damage_report=damage_report)
 
 @router.delete("/{damage_report_id}", response_model=schemas.DamageReport)
 def delete_damage_report(damage_report_id: int, db: Session = Depends(get_db), current_user: Employee = Depends(get_current_active_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only administrators can delete damage reports")
     db_damage_report = crud.get_damage_report(db, damage_report_id=damage_report_id)
     if db_damage_report is None:
         raise HTTPException(status_code=404, detail="Damage report not found")
-    if current_user.role != "admin" and db_damage_report.employee_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
     return crud.delete_damage_report(db, damage_report_id=damage_report_id)
 
 @router.post("/{damage_report_id}/replace")
@@ -332,4 +334,3 @@ def mark_damage_report_replaced(
         "message": f"Damage claim #{damage_report_id} has been marked as replaced and removed from active damages.",
         "damage_report": updated
     }
-

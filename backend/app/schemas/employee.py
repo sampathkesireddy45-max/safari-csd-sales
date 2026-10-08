@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 from datetime import datetime
 
@@ -16,7 +16,7 @@ class EmployeeBase(BaseModel):
     location_updated_at: Optional[datetime] = None
 
 class EmployeeCreate(EmployeeBase):
-    password: Optional[str] = "safari123"
+    password: Optional[str] = None
 
 class EmployeeUpdate(BaseModel):
     employee_id: Optional[str] = None
@@ -32,11 +32,11 @@ class EmployeeUpdate(BaseModel):
     current_longitude: Optional[float] = None
 
 class LiveLocationUpdate(BaseModel):
-    latitude: float
-    longitude: float
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
 
 class EmployeePasswordReset(BaseModel):
-    password: str
+    password: str = Field(..., min_length=8)
 
 class EmployeeInDBBase(EmployeeBase):
     id: int

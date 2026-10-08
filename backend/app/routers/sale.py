@@ -41,12 +41,12 @@ def read_sale(sale_id: int, db: Session = Depends(get_db), current_user: Employe
 
 @router.put("/{sale_id}", response_model=schemas.Sale)
 def update_sale(sale_id: int, sale: schemas.SaleUpdate, db: Session = Depends(get_db), current_user: Employee = Depends(get_current_active_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only administrators can amend sales")
     db_sale = crud.get_sale(db, sale_id=sale_id)
     if db_sale is None:
         raise HTTPException(status_code=404, detail="Sale not found")
     # Check if the user is authorized to update this sale
-    if current_user.role != "admin" and db_sale.employee_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
     # We should not allow changing the employee_id or location_id via update? We'll allow only certain fields.
     # For simplicity, we'll allow updating the sale_date and total_pieces? But the SaleUpdate schema doesn't have those.
     # We'll just update the fields that are in the schema.
@@ -54,11 +54,10 @@ def update_sale(sale_id: int, sale: schemas.SaleUpdate, db: Session = Depends(ge
 
 @router.delete("/{sale_id}", response_model=schemas.Sale)
 def delete_sale(sale_id: int, db: Session = Depends(get_db), current_user: Employee = Depends(get_current_active_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only administrators can delete sales")
     db_sale = crud.get_sale(db, sale_id=sale_id)
     if db_sale is None:
         raise HTTPException(status_code=404, detail="Sale not found")
     # Check if the user is authorized to delete this sale
-    if current_user.role != "admin" and db_sale.employee_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
     return crud.delete_sale(db, sale_id=sale_id)
-

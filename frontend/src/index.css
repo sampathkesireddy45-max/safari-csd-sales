@@ -2,3 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
+html.dark { color-scheme: dark; }
+body { transition: background-color 160ms ease, color 160ms ease; }
+
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.scroll-reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out);
+}
+
+.scroll-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.chart-bar {
+  transform: scaleY(0.04);
+  transform-origin: bottom;
+  transition: transform 240ms var(--ease-out), background-color 160ms ease;
+}
+
+.chart-bar.has-value {
+  transform: scaleY(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-reveal,
+  .scroll-reveal.is-visible {
+    opacity: 1;
+    transform: none;
+    transition: opacity 160ms ease;
+  }
+
+  .chart-bar,
+  .chart-bar.has-value {
+    transform: none;
+    transition: background-color 160ms ease;
+  }
+}
