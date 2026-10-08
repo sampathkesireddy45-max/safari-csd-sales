@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import Layout from "../components/Layout";
-import { getEmployees, resetEmployeePassword, getLocations, createEmployee } from "../services/api";
+import { getEmployees, resetEmployeePassword, getLocations, createEmployee, deleteEmployee } from "../services/api";
 import { TableSkeleton } from "../components/LoadingSkeleton";
 import EmptyState from "../components/EmptyState";
 import { useToast } from "../components/Toast";
@@ -19,7 +19,8 @@ import {
   UserPlus,
   Share2,
   X,
-  AlertCircle
+  AlertCircle,
+  Trash2
 } from "lucide-react";
 
 const AdminCredentials = () => {
@@ -34,6 +35,7 @@ const AdminCredentials = () => {
   const [newPassword, setNewPassword] = useState("");
   const [showPlainPassword, setShowPlainPassword] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
+  const [removingEmployeeId, setRemovingEmployeeId] = useState(null);
 
   // Copied state indicator
   const [copiedId, setCopiedId] = useState(null);
@@ -156,6 +158,26 @@ Please log in using your User ID and the password above.`;
       const payload = {
         ...newEmpData,
         assigned_location_id: newEmpData.assigned_location_id ? parseInt(newEmpData.assigned_location_id, 10) : null,
+      };
+
+      const handleRemoveEmployee = async (emp) => {
+        if (emp.role === "admin") {
+          addToast("Admin accounts cannot be removed from the staff portal", "error");
+          return;
+        }
+        if (!window.confirm(`Remove ${emp.name} (${emp.employee_id}) from staff credentials? This action cannot be undone.`)) {
+          return;
+        }
+        setRemovingEmployeeId(emp.id);
+        try {
+          await deleteEmployee(emp.id);
+          setEmployees((current) => current.filter((employee) => employee.id !== emp.id));
+          addToast(`${emp.name} was removed successfully`, "success");
+        } catch (err) {
+          addToast(err.message || "Failed to remove employee", "error");
+        } finally {
+          setRemovingEmployeeId(null);
+        }
       };
       await createEmployee(payload);
       addToast("Staff member & credentials created successfully!", "success");
@@ -324,6 +346,18 @@ Please log in using your User ID and the password above.`;
                               <Key className="w-3.5 h-3.5" />
                               <span>Set Password</span>
                             </button>
+                            {emp.role !== "admin" && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveEmployee(emp)}
+                                disabled={removingEmployeeId === emp.id}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 transition disabled:opacity-50"
+                                title="Remove employee"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>{removingEmployeeId === emp.id ? "Removing..." : "Remove"}</span>
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

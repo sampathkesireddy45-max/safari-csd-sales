@@ -126,6 +126,10 @@ def delete_employee(employee_id: int, db: Session = Depends(get_db), current_use
     db_employee = crud.get_employee(db, employee_id=employee_id)
     if db_employee is None:
         raise HTTPException(status_code=404, detail="Employee not found")
+    if db_employee.id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot remove your own admin account")
+    if db_employee.role == "admin":
+        raise HTTPException(status_code=403, detail="Admin accounts cannot be removed from the staff portal")
     return crud.delete_employee(db, employee_id=employee_id)
 
 # --- Admin Password Reset for Staff ---
