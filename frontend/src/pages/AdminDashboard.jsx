@@ -384,7 +384,7 @@ const AdminDashboard = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
               <div className="rounded-xl bg-slate-50 border border-slate-100 p-4">
                 <p className="text-xs font-semibold text-slate-500">
                   {selectedSalesEmployee ? "Selected employee sales" : "Overall sales"}
@@ -397,6 +397,10 @@ const AdminDashboard = () => {
                 <p className="text-xs font-semibold text-slate-500">Sale transactions</p>
                 <p className="text-2xl font-black text-slate-900 mt-2">{salesSummary.overall.sale_count.toLocaleString("en-IN")}</p>
               </div>
+              <div className="rounded-xl bg-amber-50 border border-amber-100 p-4">
+                <p className="text-xs font-semibold text-amber-700">Sale value</p>
+                <p className="text-2xl font-black text-amber-950 mt-2">₹{Number(salesSummary.overall.total_cost || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+              </div>
             </div>
 
             {salesLoading ? (
@@ -407,7 +411,7 @@ const AdminDashboard = () => {
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs text-slate-700">
                   <thead className="border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-400">
-                    <tr><th className="py-3">Date</th><th>Employee</th><th>Location</th><th>Line items</th><th className="text-right">Pieces</th></tr>
+                    <tr><th className="py-3">Date</th><th>Employee</th><th>Location</th><th>Line items</th><th>Cost</th><th className="text-right">Pieces</th></tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {salesSummary.sales.map((sale) => (
@@ -416,6 +420,7 @@ const AdminDashboard = () => {
                         <td className="font-medium">{sale.employee_name}</td>
                         <td>{sale.location_name}</td>
                         <td>{sale.item_count}</td>
+                        <td>₹{Number(sale.total_cost || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
                         <td className="text-right font-bold text-emerald-700">{sale.total_pieces}</td>
                       </tr>
                     ))}

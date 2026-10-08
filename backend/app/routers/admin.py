@@ -17,6 +17,13 @@ router = APIRouter(
     dependencies=[Depends(get_current_active_admin_user)],
 )
 
+def _sale_cost(sale):
+    return round(sum(
+        (item.product.selling_rate if item.product and item.product.selling_rate is not None
+         else item.product.rate_per_pc if item.product and item.product.rate_per_pc is not None else 0) * item.quantity
+        for item in sale.items
+    ), 2)
+
 def _sales_query(db: Session, employee_id: int = None, date_from: str = None, date_to: str = None):
     query = db.query(models.Sale).join(models.Employee).join(models.Location)
     if employee_id:
@@ -37,6 +44,7 @@ def get_admin_sales_summary(
 ):
     query = _sales_query(db, employee_id, date_from, date_to)
     sales = query.order_by(models.Sale.sale_date.desc()).limit(limit).all()
+    all_sales = query.all()
     employee_totals = db.query(
         models.Employee.id,
         models.Employee.employee_id,
@@ -52,10 +60,14 @@ def get_admin_sales_summary(
         employee_totals = employee_totals.filter(models.Sale.sale_date < datetime.fromisoformat(date_to) + timedelta(days=1))
     employee_totals = employee_totals.group_by(models.Employee.id).order_by(func.sum(models.Sale.total_pieces).desc()).all()
     total_pieces = query.with_entities(func.coalesce(func.sum(models.Sale.total_pieces), 0)).scalar() or 0
+    sales_cost = round(sum(_sale_cost(sale) for sale in all_sales), 2)
+    employee_costs = {}
+    for sale in all_sales:
+        employee_costs[sale.employee_id] = round(employee_costs.get(sale.employee_id, 0) + _sale_cost(sale), 2)
     return {
-        "overall": {"sale_count": query.count(), "total_pieces": int(total_pieces)},
+        "overall": {"sale_count": query.count(), "total_pieces": int(total_pieces), "total_cost": sales_cost},
         "employees": [
-            {"id": row.id, "employee_id": row.employee_id, "name": row.name, "sale_count": row.sale_count, "total_pieces": int(row.total_pieces or 0)}
+            {"id": row.id, "employee_id": row.employee_id, "name": row.name, "sale_count": row.sale_count, "total_pieces": int(row.total_pieces or 0), "total_cost": employee_costs.get(row.id, 0)}
             for row in employee_totals if row.sale_count
         ],
         "sales": [
@@ -66,6 +78,7 @@ def get_admin_sales_summary(
                 "employee_name": sale.employee.name if sale.employee else "Unknown",
                 "location_name": sale.location.name if sale.location else "Unknown",
                 "total_pieces": int(sale.total_pieces or 0),
+                "total_cost": _sale_cost(sale),
                 "item_count": len(sale.items),
             }
             for sale in sales
@@ -82,7 +95,7 @@ def export_admin_sales(
     sales = _sales_query(db, employee_id, date_from, date_to).order_by(models.Sale.sale_date.desc()).all()
     output = io.StringIO(newline="")
     writer = csv.writer(output)
-    writer.writerow(["Sale ID", "Sale Date", "Sale Time", "Employee ID", "Employee", "Location", "Total Pieces", "Line Items"])
+    writer.writerow(["Sale ID", "Sale Date", "Sale Time", "Employee ID", "Employee", "Location", "Total Pieces", "Total Cost (INR)", "Line Items"])
     for sale in sales:
         sale_date = sale.sale_date.strftime("%Y-%m-%d") if sale.sale_date else ""
         sale_time = sale.sale_date.strftime("%H:%M:%S") if sale.sale_date else ""
@@ -94,6 +107,7 @@ def export_admin_sales(
             sale.employee.name if sale.employee else "Unknown",
             sale.location.name if sale.location else "Unknown",
             sale.total_pieces or 0,
+            f"{_sale_cost(sale):.2f}",
             len(sale.items),
         ])
     output.seek(0)
@@ -116,7 +130,7 @@ def export_admin_sales_xlsx(
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = "Sales"
-    worksheet.append(["Sale ID", "Sale Date", "Sale Time", "Employee ID", "Employee", "Location", "Total Pieces", "Line Items"])
+    worksheet.append(["Sale ID", "Sale Date", "Sale Time", "Employee ID", "Employee", "Location", "Total Pieces", "Total Cost (INR)", "Line Items"])
     for sale in sales:
         worksheet.append([
             sale.id,
@@ -126,6 +140,7 @@ def export_admin_sales_xlsx(
             sale.employee.name if sale.employee else "Unknown",
             sale.location.name if sale.location else "Unknown",
             sale.total_pieces or 0,
+            _sale_cost(sale),
             len(sale.items),
         ])
     for cell in worksheet[1]:
@@ -139,10 +154,13 @@ def export_admin_sales_xlsx(
     worksheet.column_dimensions["E"].width = 22
     worksheet.column_dimensions["F"].width = 18
     worksheet.column_dimensions["G"].width = 14
-    worksheet.column_dimensions["H"].width = 12
+    worksheet.column_dimensions["H"].width = 18
+    worksheet.column_dimensions["I"].width = 12
     for row in worksheet.iter_rows(min_row=2, min_col=2, max_col=3):
         row[0].number_format = "yyyy-mm-dd"
         row[1].number_format = "hh:mm:ss"
+    for row in worksheet.iter_rows(min_row=2, min_col=8, max_col=8):
+        row[0].number_format = '#,##0.00'
     output = io.BytesIO()
     workbook.save(output)
     output.seek(0)
