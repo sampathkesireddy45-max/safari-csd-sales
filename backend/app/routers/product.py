@@ -19,10 +19,12 @@ def read_products(
     skip: int = 0,
     limit: int = 500,
     q: str = None,
+    brand: str = None,
+    category: str = None,
     db: Session = Depends(get_db),
     current_user: models.Employee = Depends(get_current_active_user)
 ):
-    products = crud.get_products(db, skip=skip, limit=limit, q=q)
+    products = crud.get_products(db, skip=skip, limit=limit, q=q, brand=brand, category=category)
     return products
 
 @router.get("/{product_id}", response_model=schemas.Product)

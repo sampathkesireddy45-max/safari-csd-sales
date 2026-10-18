@@ -1,7 +1,7 @@
 # Safari CSD Sales & Stock Telemetry - Session Checkpoint
 
-**Last Saved Timestamp:** September 29, 2026 - 22:36 IST  
-**Conversation ID:** `a708744d-9fbe-4167-ab1b-2313d326b458`  
+**Last Saved Timestamp:** October 18, 2026 - 14:55 IST  
+**Conversation ID:** `c770b319-1fa5-47ba-95cf-7457f78d8586` (resumed from `beac8206-6b50-4249-ba27-4d0476831be3`)  
 **Workspace Path:** `C:\Users\sampa\overall sales`  
 
 ---
@@ -23,63 +23,115 @@
 
 ## 2. Active Services & URLs
 - **GitHub Repository**: [https://github.com/sampathkesireddy45-max/safari-csd-sales](https://github.com/sampathkesireddy45-max/safari-csd-sales)
-- **Public Live Deployment Link**: [https://robbie-sheffield-growing-unsigned.trycloudflare.com](https://robbie-sheffield-growing-unsigned.trycloudflare.com)
-- **Frontend App**: `http://localhost:5173` (Vite dev) or unified on `http://localhost:8000`
-- **Backend API**: `http://localhost:8000` (FastAPI + SQLAlchemy + SQLite `backend/test.db`)
-- **Interactive API Docs**: `http://localhost:8000/docs` (or `/docs` on the public deployment link)
+- **Public Live Deployment Link**: [https://booking-insulin-shorter-quantitative.trycloudflare.com](https://booking-insulin-shorter-quantitative.trycloudflare.com)
+- **Frontend App**: `http://localhost:5173` (Vite dev, running `--host`)
+- **Backend API**: `http://localhost:8000` (FastAPI + SQLAlchemy + SQLite `backend/test.db`, running `--reload`)
+- **Interactive API Docs**: `http://localhost:8000/docs`
 
 ---
 
-## 3. Key Completed Features & Architecture
+## 3. Key Completed Features & Recent Modifications
 
-### A. Safari CSD Catalog & Dynamic Inventory
-- Imported official Safari CSD rates catalog from `C:\Users\sampa\Downloads\safari csd rates pcs .xlsx`.
-- Contains all official CSD Index Numbers (e.g., `36812`, `36813`), model descriptions, base rates per piece, and canteen selling prices.
-- Dynamic inventory management: Both employees and admins can directly enter and update physical piece counts per item.
-- Searchable product selector during sales and damage entries by CSD Index Number or product name.
+### A. Fresh Product Catalog Imported from INDEX.xlsx (100 SKUs)
+- Removed all legacy sample products and imported the complete **100 products** from `C:\Users\sampa\Downloads\INDEX.xlsx`.
+- Every product incorporates:
+  - Official CSD Index Number (e.g., `#36812`, `#36813`)
+  - Full distinct model description with colour specification (e.g., `SENTINEL 56 4W (WINE)`)
+  - Brand identification: `SAFARI` (92 SKUs) & `URBEN JUNGLE` (8 SKUs)
+  - Category (`HL` - Hard Luggage, `SL` - Soft Luggage)
+  - Sub-Category (`PC UPRIGHT`, `BACKPACK`, `RDFL`, `PP UPRIGHT`, `SL UPRIGHT`, `U/J PC UPRIGHT`, `SCHOOL BAG`)
+  - Case Pack size (`4`, `3`, `20`, `8`, `12`, `2`, `15` pieces/case)
+  - Official Canteen Selling Rates per Piece
+- Zero-inventory baseline seeded for active retail store (`Scindia`), ready for physical counts.
 
-### B. Real Store Locations & Geofencing
-- Admin enters store locations with real-world verification via OpenStreetMap / Nominatim geocoding.
-- Locations include latitude and longitude coordinates.
-- Active store: **Scindia (Visakhapatnam, Andhra Pradesh)** at `Lat: 17.688009, Lon: 83.262097`.
+### B. Dynamic Cases & Pieces Conversion Engine
+- **Admin Catalog Unit Switcher**:
+  - Global toggle `[ 📦 Pieces (PCS) ]` vs `[ 🧰 Cases (BOXES) ]` on Admin Dashboard.
+  - Switches table view instantly between Piece Rate (`₹2,693.85 / PC`) and Case Rate (`₹10,775.40 / Case`).
+  - Automatically calculates `Case Rate = Piece Rate × Case Pack`.
+- **Stock Entry Modal (`StockEntryModal.jsx`)**:
+  - Staff & Admins can switch entry unit between **Pieces** and **Cases (Boxes)**.
+  - Live conversion badge: `e.g. 5 Cases × 4 Pcs/Case = 20 Pieces`.
+  - Quick addition buttons adapt dynamically (`+1 Case`, `+5 Cases`, `+10 Cases` vs `+5 Pcs`, `+20 Pcs`).
+  - Backend supports direct `unit: "cases"` and stores effective physical pieces count.
+- **Retail Sales Counter (`SalesEntry.jsx`)**:
+  - Cashier / staff can sell in **Pieces** or **Cases**.
+  - Subtotal automatically calculates `quantity × (selling_rate × case_pack)` when selling by case.
+  - Decrements live warehouse inventory in pieces accurately.
+- **Stock Displays**:
+  - Both Employee and Admin Dashboards display live inventory as `{quantity} PCS ≈ {quantity // case_pack} Cases`.
 
-### C. Live Employee & Admin Geolocation Map
-- Interactive Leaflet map powered by OpenStreetMap tiles.
-- **Embedded Admin Dashboard Widget** (`frontend/src/components/LiveEmployeeMapWidget.jsx`):
-  - Visible directly on the Admin Dashboard (`/admin/dashboard`).
-  - Active staff pins (emerald green for online with radar pulse, slate for offline).
-  - Distinct purple pin for Admin HQ with `ADM` badge.
-  - Retail store building markers with code and address popups.
-  - Staff attendance roster with **"Locate"** button to zoom directly to any employee.
-  - **"Sync My Real Location"** button: Automatically acquires real device GPS via browser `navigator.geolocation` and syncs coordinates to the backend database.
-- **Full Geofence & Tracking Page** (`frontend/src/pages/AdminLiveTracking.jsx` at `/admin/live-locations`):
-  - Auto-refresh every 20s, filter tabs (`All Staff`, `Online Only`, `With GPS`).
-  - Geofence distance calculation to assigned stores.
+### C. Admin Price Management & SKU Creation
+- **Synchronized Price Editor**:
+  - Admin can click **"Price"** on any SKU in the catalog table.
+  - Dual synchronized inputs: editing Price per Piece automatically updates Price per Case, and vice-versa.
+  - Persists directly via `PUT /products/{id}`.
+- **Add New SKU Modal**:
+  - Admin can click **"+ Add New SKU"** to create a product on the fly.
+  - Captures Index No., Model Name, Colour, Brand, Category, Sub-Category, Case Pack, and Selling Rate.
+  - Persists directly via `POST /products/`.
 
-### D. Damage Claims & "Replaced" Lifecycle
-- Replaced damage claims are excluded from active damages calculations (`totalDamaged` in dashboard metrics, 7-day velocity chart, active reports list).
-- Both Admin Dashboard and Damage Reports page provide a **[Replaced]** button.
-- Status filter: `Active Damages`, `Replaced Pieces`, `All Records`.
-- Audit logs recorded for all replacements and photo modifications.
+### D. Real Store Locations & Live GPS Telemetry
+- Active node: **Scindia (Visakhapatnam, Andhra Pradesh)** at `Lat: 17.688009, Lon: 83.262097`.
+- Embedded interactive Leaflet radar map with online/offline employee GPS tracking.
+- Damage replacement tracking and staff credentials management.
+
+### E. Individual Index-Wise Sales & Accurate IST Export
+- **Dedicated Index-Wise Sales Section (`AdminSales.jsx`)**:
+  - Distinct section presenting index-by-index SKU performance across all 100 catalog products.
+  - Displays: Index Number (`#36812`), Product Name, Brand, Colour, Category, Case Pack, Unit Selling Price (`₹ / PC`), Case Price (`₹ / Case`), Total Pieces Sold, Equivalent Cases Sold, Total Sales Revenue, and Transaction frequency.
+  - Interactive search bar, brand filter (SAFARI / URBEN JUNGLE), sold-only filter, and instant Pieces/Cases unit toggle.
+- **Indian Standard Time (IST) Timezone Fix (`timezone.py` & `admin.py`)**:
+  - Timezone utility converts UTC database timestamps to accurate naive Indian Standard Time (IST, UTC+5:30).
+  - All Excel exports now feature two comprehensive worksheets:
+    1. **"Index-Wise Sales Summary"**: Full product catalog sales aggregate with formatted currency and summary formulas.
+    2. **"Sale Transactions"**: Individual transaction log with exact IST Date (`yyyy-mm-dd`) and IST Time (`hh:mm:ss AM/PM`) and SKU breakdown.
+  - Dedicated Index-Wise CSV and Transactions CSV export endpoints.
+
+### F. Low Stock (< 5 Pieces) Real-Time Visual Indication System
+- **Backend Schema & Serializer**:
+  - Updated `backend/app/models/product.py` with `@property def total_stock(self) -> int` dynamically aggregated across all store inventory records.
+  - Added `total_stock: Optional[int] = 0` to `ProductInDBBase` schema (`backend/app/schemas/product.py`) so all product queries provide stock status instantly.
+- **Admin Catalog (`AdminDashboard.jsx`)**:
+  - Split inventory metrics into two distinct columns: **"Current Stock"** (clean numerical piece count and case breakdown) and **"Stock Status"** (dedicated status column).
+  - Status classification rules:
+    - `< 5 Pieces`: Displays **"Low Stock (<5)"** red alert badge (or **"Out of Stock (0)"** if 0 pieces), accented with a red left border.
+    - `> 10 Pieces`: Displays **"Overstock (>10)"** amber badge with high inventory notice (`{qty} pcs`), accented with an amber left border.
+    - `5–10 Pieces`: Displays **"Normal (5–10)"** emerald badge indicating optimal stock.
+  - Added dual filter buttons in toolbar: **"Low Stock (<5 pcs)"** and **"Overstock (>10 pcs)"** with live product counts.
+- **Representative Dashboard (`EmployeeDashboard.jsx`)**:
+  - Store inventory cards display **"Low Stock"** (<5 pcs) or **"Overstock"** (>10 pcs) badges and alerts.
+  - Added quick filter buttons for both **"Low Stock (<5)"** and **"Overstock (>10)"**.
+- **Luggage Search & Sales Entry (`ProductSearchSelect.jsx` & `SalesEntry.jsx`)**:
+  - Autocomplete search dropdown badges items in real time: `< 5 pcs` Low Stock / Out of Stock, `> 10 pcs` Overstock, and `5–10 pcs` Optimal Stock.
+
+### G. Exported Sheets "Date Sold" & "SKU's" Branding Update
+- **CSV & Excel Exported Sheets (`admin.py`)**:
+  - Replaced the `"Transactions Count"` column with `"Date Sold"` across both Index-Wise CSV and Excel exports.
+  - Dynamically extracts and formats the actual dates each product was sold (e.g., `2026-10-18`) in Indian Standard Time (IST).
+- **Sales & Admin Dashboards (`AdminSales.jsx` & `AdminDashboard.jsx`)**:
+  - Standardized terminology across the sales dashboard from `"SKUs"` to `"SKU's"` (`Index SKU's Active`, `/ 100 SKU's`, `All 100 SKU's`, `Sold SKU's Only`, `Showing X Index SKU's`, and `Index Total (X SKU's)`).
+  - Aligned the Index-Wise table column in the UI to display `"Date Sold"` instead of `"Txns"`.
 
 ---
 
 ## 4. Key Files
-- `frontend/src/pages/AdminDashboard.jsx`: Executive fleet dashboard with embedded live map and telemetry.
-- `frontend/src/components/LiveEmployeeMapWidget.jsx`: Embedded Leaflet map widget with GPS sync.
-- `frontend/src/pages/AdminLiveTracking.jsx`: Full-screen live tracking and geofence dashboard.
-- `frontend/src/pages/AdminDamages.jsx`: Damage reports gallery & table with "Replaced" action.
-- `frontend/src/services/api.js`: All API client bindings including live locations, replacement, and catalog.
-- `backend/app/routers/employee.py`: Live locations broadcast & retrieval routes.
-- `backend/app/routers/damage_report.py`: Damage reporting, photo uploads, audit logs, and replacement endpoints.
-- `backend/app/routers/admin.py`: Fleet metrics and sales/defect velocity calculations.
+- `frontend/src/pages/AdminSales.jsx`: Upgraded sales dashboard with dedicated Individual Index-Wise Sales table, search, brand filters, and multi-format IST exports.
+- `frontend/src/pages/AdminDashboard.jsx`: Executive dashboard with cases/pieces toggle, brand filters, synchronized price editor modal, Current Stock column, and Low Stock (<5) filter.
+- `frontend/src/pages/EmployeeDashboard.jsx`: Representative dashboard with real-time dynamic inventory counts, piece/case converter, and red Low Stock (<5) visual alerts.
+- `frontend/src/pages/SalesEntry.jsx`: Sales counter with real-time stock availability verification and low-stock warning banners.
+- `frontend/src/components/ProductSearchSelect.jsx`: Product lookup autocomplete with live stock level indicators and low stock badges.
+- `backend/app/models/product.py`: Product model with dynamic `total_stock` inventory calculation property.
+- `backend/app/schemas/product.py`: Product Pydantic schemas serializing `total_stock`.
 
 ---
 
 ## 5. Instructions to Resume Tomorrow
 When the user says:
 - `"restart tomorrow"`
-- `"resume"`
-- `"continue"`
+- `"resume this conversation"`
+- `"resume tomorrow"`
+- `"continue overall sales"`
+- `"continue sales"`
 - or opens the session:
-Check that both backend and frontend servers are listening on `8000` and `5173`, read this checkpoint, and resume immediately from this exact state.
+Check that both backend (`http://localhost:8000`) and frontend (`http://localhost:5173`) are running, read this checkpoint, and resume immediately.

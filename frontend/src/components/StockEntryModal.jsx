@@ -35,6 +35,8 @@ const StockEntryModal = ({
   const [mode, setMode] = useState("set"); // "set" (override count) or "add" (add incoming)
   const [loading, setLoading] = useState(false);
 
+  const [entryUnit, setEntryUnit] = useState("pieces"); // "pieces" or "cases"
+
   useEffect(() => {
     if (isOpen) {
       if (initialProduct) {
@@ -44,6 +46,7 @@ const StockEntryModal = ({
         setSelectedLocationId(defaultLocationId);
       }
       setQuantity("");
+      setEntryUnit("pieces");
     }
   }, [isOpen, initialProduct, defaultLocationId]);
 
@@ -56,6 +59,11 @@ const StockEntryModal = ({
   const selectedLocation = locations.find(
     (l) => String(l.id) === String(selectedLocationId)
   );
+
+  const casePack = selectedProduct?.case_pack || 1;
+  const numQty = parseInt(quantity, 10) || 0;
+  const computedPieces = entryUnit === "cases" ? numQty * casePack : numQty;
+  const computedCases = entryUnit === "pieces" ? (casePack > 0 ? (numQty / casePack).toFixed(1) : 0) : numQty;
 
   const handleQuickAdd = (amount) => {
     const current = parseInt(quantity, 10) || 0;
@@ -72,7 +80,7 @@ const StockEntryModal = ({
 
     const qty = parseInt(quantity, 10);
     if (isNaN(qty) || qty < 0) {
-      addToast("Please enter a valid piece count (0 or greater)", "error");
+      addToast(`Please enter a valid ${entryUnit} count (0 or greater)`, "error");
       return;
     }
 
@@ -87,6 +95,7 @@ const StockEntryModal = ({
       const payload = {
         product_id: parseInt(selectedProductId, 10),
         quantity: qty,
+        unit: entryUnit,
         mode: mode,
       };
 
@@ -96,7 +105,7 @@ const StockEntryModal = ({
 
       const res = await updateStock(payload);
       addToast(
-        res.message || `Stock updated to ${qty} PCS successfully!`,
+        res.message || `Stock updated to ${computedPieces} PCS successfully!`,
         "success"
       );
 
@@ -228,22 +237,66 @@ const StockEntryModal = ({
             </p>
           </div>
 
-          {/* Quantity Input */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
+          {/* Unit Toggle & Quantity Input */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700">
-                Number of Pieces (PCS) <span className="text-rose-500">*</span>
+                Entry Unit & Count <span className="text-rose-500">*</span>
               </label>
-              {selectedProduct?.selling_rate && quantity > 0 && (
-                <span className="text-[11px] text-emerald-700 font-semibold font-mono">
-                  Valuation: ₹
-                  {(selectedProduct.selling_rate * parseInt(quantity, 10)).toLocaleString(
-                    "en-IN"
-                  )}
-                </span>
-              )}
+              
+              {/* Unit Toggle Tabs */}
+              <div className="inline-flex p-0.5 bg-slate-100 rounded-xl border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setEntryUnit("pieces")}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
+                    entryUnit === "pieces"
+                      ? "bg-white text-indigo-700 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Pieces (PCS)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEntryUnit("cases")}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
+                    entryUnit === "cases"
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Cases (Boxes)
+                </button>
+              </div>
             </div>
 
+            {/* Live Case Pack Info Banner */}
+            {selectedProduct && (
+              <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-slate-700">Case Pack Size:</span>
+                  <span className="px-2 py-0.5 rounded-md font-mono font-bold bg-indigo-100 text-indigo-800 text-[11px]">
+                    {casePack} PCS / Case
+                  </span>
+                </div>
+                {numQty > 0 && (
+                  <div className="flex items-center gap-2 font-mono text-[11px]">
+                    {entryUnit === "cases" ? (
+                      <span className="text-indigo-700 font-semibold bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                        📦 {numQty} Cases = <strong className="text-indigo-900">{computedPieces} Pieces</strong>
+                      </span>
+                    ) : (
+                      <span className="text-indigo-700 font-semibold bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                        📦 {numQty} Pieces ≈ <strong className="text-indigo-900">{computedCases} Cases</strong>
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Input & Valuation */}
             <div className="relative">
               <input
                 type="number"
@@ -251,27 +304,34 @@ const StockEntryModal = ({
                 required
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
-                placeholder="Enter physical pieces count (e.g. 24)"
-                className="w-full text-sm font-semibold px-4 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition font-mono"
+                placeholder={entryUnit === "cases" ? "Enter case / box count (e.g. 5)" : "Enter piece count (e.g. 20)"}
+                className="w-full text-sm font-semibold px-4 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition font-mono pr-20"
               />
-              <span className="absolute inset-y-0 right-0 pr-4 flex items-center text-xs font-semibold text-slate-400 pointer-events-none">
-                PCS
+              <span className="absolute inset-y-0 right-0 pr-4 flex items-center text-xs font-bold uppercase tracking-wider text-indigo-600 pointer-events-none">
+                {entryUnit === "cases" ? "CASES" : "PIECES"}
               </span>
             </div>
 
+            {/* Valuation display */}
+            {selectedProduct?.selling_rate && numQty > 0 && (
+              <div className="flex justify-end text-[11px] text-emerald-700 font-semibold font-mono">
+                Valuation: ₹{(selectedProduct.selling_rate * computedPieces).toLocaleString("en-IN")}
+              </div>
+            )}
+
             {/* Quick Increment Buttons */}
-            <div className="flex items-center gap-1.5 mt-2">
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
               <span className="text-[10px] text-slate-400 mr-1 font-semibold uppercase">
-                Quick:
+                Quick +:
               </span>
-              {[5, 10, 20, 50, 100].map((amt) => (
+              {(entryUnit === "cases" ? [1, 2, 5, 10, 25] : [5, 10, 20, 50, 100]).map((amt) => (
                 <button
                   key={amt}
                   type="button"
                   onClick={() => handleQuickAdd(amt)}
                   className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-semibold transition"
                 >
-                  +{amt}
+                  +{amt} {entryUnit === "cases" ? "Case" : "Pcs"}
                 </button>
               ))}
               <button
@@ -279,7 +339,7 @@ const StockEntryModal = ({
                 onClick={() => setQuantity("0")}
                 className="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] font-semibold transition ml-auto"
               >
-                0 PCS (Out of stock)
+                0 (Zero Stock)
               </button>
             </div>
           </div>

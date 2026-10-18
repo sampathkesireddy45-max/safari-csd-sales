@@ -8,6 +8,13 @@ from sqlalchemy import func
 from .. import models, crud
 from ..utils.database import get_db
 from ..utils.auth import get_current_active_admin_user
+from ..utils.timezone import (
+    to_ist,
+    format_ist_date,
+    format_ist_time,
+    format_ist_datetime,
+    ist_date_to_utc_bounds,
+)
 from datetime import datetime, timedelta
 
 router = APIRouter(
@@ -29,10 +36,89 @@ def _sales_query(db: Session, employee_id: int = None, date_from: str = None, da
     if employee_id:
         query = query.filter(models.Sale.employee_id == employee_id)
     if date_from:
-        query = query.filter(models.Sale.sale_date >= datetime.fromisoformat(date_from))
+        try:
+            start_utc = ist_date_to_utc_bounds(date_from, is_end_date=False)
+            query = query.filter(models.Sale.sale_date >= start_utc)
+        except Exception:
+            query = query.filter(models.Sale.sale_date >= datetime.fromisoformat(date_from))
     if date_to:
-        query = query.filter(models.Sale.sale_date < datetime.fromisoformat(date_to) + timedelta(days=1))
+        try:
+            end_utc = ist_date_to_utc_bounds(date_to, is_end_date=True)
+            query = query.filter(models.Sale.sale_date <= end_utc)
+        except Exception:
+            query = query.filter(models.Sale.sale_date < datetime.fromisoformat(date_to) + timedelta(days=1))
     return query
+
+def _build_index_wise_sales(all_sales, db: Session):
+    """
+    Computes aggregated index-wise performance for products, combining total pieces,
+    equivalent cases, revenue, and date sold.
+    """
+    product_sales_map = {}
+    for sale in all_sales:
+        sale_date_str = format_ist_date(sale.sale_date)
+        for item in sale.items:
+            pid = item.product_id
+            if pid not in product_sales_map:
+                product_sales_map[pid] = {
+                    "pieces_sold": 0,
+                    "transactions_count": 0,
+                    "sale_dates": set(),
+                }
+            product_sales_map[pid]["pieces_sold"] += item.quantity
+            product_sales_map[pid]["transactions_count"] += 1
+            if sale_date_str:
+                product_sales_map[pid]["sale_dates"].add(sale_date_str)
+
+    products = db.query(models.Product).filter(models.Product.is_active == True).order_by(models.Product.index_no, models.Product.name).all()
+    
+    index_wise = []
+    total_catalog_pieces = 0
+    total_catalog_revenue = 0.0
+
+    for p in products:
+        sales_info = product_sales_map.get(p.id, {"pieces_sold": 0, "transactions_count": 0, "sale_dates": set()})
+        pieces_sold = sales_info["pieces_sold"]
+        sorted_dates = sorted(list(sales_info["sale_dates"]), reverse=True)
+        date_sold_str = ", ".join(sorted_dates) if sorted_dates else ""
+        
+        selling_rate = p.selling_rate if p.selling_rate is not None else (p.rate_per_pc or 0.0)
+        case_pack = p.case_pack if p.case_pack and p.case_pack > 0 else 1
+        case_rate = round(selling_rate * case_pack, 2)
+        revenue = round(pieces_sold * selling_rate, 2)
+        cases_sold = round(pieces_sold / case_pack, 2)
+        
+        total_catalog_pieces += pieces_sold
+        total_catalog_revenue = round(total_catalog_revenue + revenue, 2)
+
+        index_wise.append({
+            "product_id": p.id,
+            "index_no": p.index_no or "N/A",
+            "name": p.name,
+            "brand": p.brand or "SAFARI",
+            "colour": p.colour or "",
+            "category": p.category or "",
+            "sub_category": p.sub_category or "",
+            "case_pack": case_pack,
+            "selling_rate": selling_rate,
+            "case_rate": case_rate,
+            "total_pieces_sold": pieces_sold,
+            "total_cases_sold": cases_sold,
+            "total_revenue": revenue,
+            "transactions_count": sales_info["transactions_count"],
+            "date_sold": date_sold_str,
+            "has_sales": pieces_sold > 0,
+        })
+
+    # Sort: products with sales first (descending pieces, then revenue), then by index_no
+    index_wise.sort(key=lambda x: (-x["total_pieces_sold"], -x["total_revenue"], x["index_no"]))
+
+    return index_wise, {
+        "total_indexes": len(products),
+        "active_indexes_sold": sum(1 for item in index_wise if item["has_sales"]),
+        "total_pieces": total_catalog_pieces,
+        "total_revenue": total_catalog_revenue,
+    }
 
 @router.get("/sales")
 def get_admin_sales_summary(
@@ -45,6 +131,9 @@ def get_admin_sales_summary(
     query = _sales_query(db, employee_id, date_from, date_to)
     sales = query.order_by(models.Sale.sale_date.desc()).limit(limit).all()
     all_sales = query.all()
+
+    index_wise_sales, index_summary = _build_index_wise_sales(all_sales, db)
+
     employee_totals = db.query(
         models.Employee.id,
         models.Employee.employee_id,
@@ -55,31 +144,58 @@ def get_admin_sales_summary(
     if employee_id:
         employee_totals = employee_totals.filter(models.Employee.id == employee_id)
     if date_from:
-        employee_totals = employee_totals.filter(models.Sale.sale_date >= datetime.fromisoformat(date_from))
+        try:
+            start_utc = ist_date_to_utc_bounds(date_from, is_end_date=False)
+            employee_totals = employee_totals.filter(models.Sale.sale_date >= start_utc)
+        except Exception:
+            employee_totals = employee_totals.filter(models.Sale.sale_date >= datetime.fromisoformat(date_from))
     if date_to:
-        employee_totals = employee_totals.filter(models.Sale.sale_date < datetime.fromisoformat(date_to) + timedelta(days=1))
+        try:
+            end_utc = ist_date_to_utc_bounds(date_to, is_end_date=True)
+            employee_totals = employee_totals.filter(models.Sale.sale_date <= end_utc)
+        except Exception:
+            employee_totals = employee_totals.filter(models.Sale.sale_date < datetime.fromisoformat(date_to) + timedelta(days=1))
     employee_totals = employee_totals.group_by(models.Employee.id).order_by(func.sum(models.Sale.total_pieces).desc()).all()
+    
     total_pieces = query.with_entities(func.coalesce(func.sum(models.Sale.total_pieces), 0)).scalar() or 0
     sales_cost = round(sum(_sale_cost(sale) for sale in all_sales), 2)
     employee_costs = {}
     for sale in all_sales:
         employee_costs[sale.employee_id] = round(employee_costs.get(sale.employee_id, 0) + _sale_cost(sale), 2)
+
     return {
         "overall": {"sale_count": query.count(), "total_pieces": int(total_pieces), "total_cost": sales_cost},
         "employees": [
             {"id": row.id, "employee_id": row.employee_id, "name": row.name, "sale_count": row.sale_count, "total_pieces": int(row.total_pieces or 0), "total_cost": employee_costs.get(row.id, 0)}
             for row in employee_totals if row.sale_count
         ],
+        "index_wise_sales": index_wise_sales,
+        "index_summary": index_summary,
         "sales": [
             {
                 "id": sale.id,
-                "sale_date": sale.sale_date,
+                "sale_date": to_ist(sale.sale_date).isoformat() if sale.sale_date else None,
+                "formatted_date": format_ist_date(sale.sale_date),
+                "formatted_time": format_ist_time(sale.sale_date),
+                "formatted_datetime": format_ist_datetime(sale.sale_date),
                 "employee_id": sale.employee_id,
                 "employee_name": sale.employee.name if sale.employee else "Unknown",
                 "location_name": sale.location.name if sale.location else "Unknown",
                 "total_pieces": int(sale.total_pieces or 0),
                 "total_cost": _sale_cost(sale),
                 "item_count": len(sale.items),
+                "items": [
+                    {
+                        "product_id": it.product_id,
+                        "index_no": it.product.index_no if it.product else "N/A",
+                        "product_name": it.product.name if it.product else "Product",
+                        "brand": it.product.brand if it.product else "",
+                        "colour": it.product.colour if it.product else "",
+                        "quantity": it.quantity,
+                        "unit_price": it.product.selling_rate if (it.product and it.product.selling_rate is not None) else (it.product.rate_per_pc or 0.0) if it.product else 0.0,
+                    }
+                    for it in sale.items
+                ]
             }
             for sale in sales
         ],
@@ -95,10 +211,25 @@ def export_admin_sales(
     sales = _sales_query(db, employee_id, date_from, date_to).order_by(models.Sale.sale_date.desc()).all()
     output = io.StringIO(newline="")
     writer = csv.writer(output)
-    writer.writerow(["Sale ID", "Sale Date", "Sale Time", "Employee ID", "Employee", "Location", "Total Pieces", "Total Cost (INR)", "Line Items"])
+    writer.writerow([
+        "Sale ID",
+        "Sale Date (IST)",
+        "Sale Time (IST)",
+        "Employee ID",
+        "Employee",
+        "Location",
+        "Index & Items Breakdown",
+        "Total Pieces",
+        "Total Cost (INR)",
+        "Line Items"
+    ])
     for sale in sales:
-        sale_date = sale.sale_date.strftime("%Y-%m-%d") if sale.sale_date else ""
-        sale_time = sale.sale_date.strftime("%H:%M:%S") if sale.sale_date else ""
+        sale_date = format_ist_date(sale.sale_date)
+        sale_time = format_ist_time(sale.sale_date)
+        items_breakdown = "; ".join(
+            f"{it.product.index_no or ''} {it.product.name if it.product else 'Product'} ({it.quantity} pcs @ ₹{it.product.selling_rate if it.product and it.product.selling_rate is not None else 0})"
+            for it in sale.items
+        )
         writer.writerow([
             sale.id,
             sale_date,
@@ -106,6 +237,7 @@ def export_admin_sales(
             sale.employee.employee_id if sale.employee else "",
             sale.employee.name if sale.employee else "Unknown",
             sale.location.name if sale.location else "Unknown",
+            items_breakdown,
             sale.total_pieces or 0,
             f"{_sale_cost(sale):.2f}",
             len(sale.items),
@@ -116,7 +248,59 @@ def export_admin_sales(
     return StreamingResponse(
         iter([csv_content]),
         media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=sales_{scope}.csv"},
+        headers={"Content-Disposition": f"attachment; filename=sales_transactions_{scope}.csv"},
+    )
+
+@router.get("/sales/export/index-wise/csv")
+def export_admin_sales_index_wise_csv(
+    employee_id: int = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: Session = Depends(get_db),
+):
+    sales = _sales_query(db, employee_id, date_from, date_to).order_by(models.Sale.sale_date.desc()).all()
+    index_wise_sales, _ = _build_index_wise_sales(sales, db)
+    
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow([
+        "Index No.",
+        "Product / Model Name",
+        "Brand",
+        "Colour",
+        "Category",
+        "Sub Category",
+        "Case Pack (Pcs)",
+        "Selling Rate / Pc (INR)",
+        "Case Rate (INR)",
+        "Total Pieces Sold",
+        "Total Cases Sold",
+        "Total Revenue (INR)",
+        "Date Sold",
+    ])
+    for it in index_wise_sales:
+        writer.writerow([
+            it["index_no"],
+            it["name"],
+            it["brand"],
+            it["colour"],
+            it["category"],
+            it["sub_category"],
+            it["case_pack"],
+            f"{it['selling_rate']:.2f}",
+            f"{it['case_rate']:.2f}",
+            it["total_pieces_sold"],
+            f"{it['total_cases_sold']:.2f}",
+            f"{it['total_revenue']:.2f}",
+            it.get("date_sold", ""),
+        ])
+    output.seek(0)
+    csv_content = "\ufeff" + output.getvalue()
+    scope = f"employee_{employee_id}" if employee_id else "overall"
+    return StreamingResponse(
+        iter([csv_content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=index_wise_sales_{scope}.csv"},
     )
 
 @router.get("/sales/export/xlsx")
@@ -127,40 +311,152 @@ def export_admin_sales_xlsx(
     db: Session = Depends(get_db),
 ):
     sales = _sales_query(db, employee_id, date_from, date_to).order_by(models.Sale.sale_date.desc()).all()
+    index_wise_sales, _ = _build_index_wise_sales(sales, db)
+
     workbook = Workbook()
-    worksheet = workbook.active
-    worksheet.title = "Sales"
-    worksheet.append(["Sale ID", "Sale Date", "Sale Time", "Employee ID", "Employee", "Location", "Total Pieces", "Total Cost (INR)", "Line Items"])
+
+    # ---------------- SHEET 1: Index-Wise Sales Summary ----------------
+    ws_index = workbook.active
+    ws_index.title = "Index-Wise Sales Summary"
+    ws_index.append([
+        "Index No.",
+        "Product / Model Name",
+        "Brand",
+        "Colour",
+        "Category",
+        "Sub Category",
+        "Case Pack (Pcs)",
+        "Selling Rate / Pc (INR)",
+        "Case Rate (INR)",
+        "Total Pieces Sold",
+        "Total Cases Sold",
+        "Total Revenue (INR)",
+        "Date Sold",
+    ])
+
+    for it in index_wise_sales:
+        ws_index.append([
+            it["index_no"],
+            it["name"],
+            it["brand"],
+            it["colour"],
+            it["category"],
+            it["sub_category"],
+            it["case_pack"],
+            it["selling_rate"],
+            it["case_rate"],
+            it["total_pieces_sold"],
+            it["total_cases_sold"],
+            it["total_revenue"],
+            it.get("date_sold", ""),
+        ])
+
+    total_idx_row = len(index_wise_sales) + 2
+    ws_index.append([
+        "TOTAL",
+        "ALL INDEXES SUMMARY",
+        "", "", "", "", "", "", "",
+        f"=SUM(J2:J{total_idx_row-1})",
+        f"=SUM(K2:K{total_idx_row-1})",
+        f"=SUM(L2:L{total_idx_row-1})",
+        "",
+    ])
+
+    for cell in ws_index[1]:
+        cell.font = cell.font.copy(bold=True)
+    for cell in ws_index[total_idx_row]:
+        cell.font = cell.font.copy(bold=True)
+
+    ws_index.freeze_panes = "A2"
+    ws_index.auto_filter.ref = f"A1:M{total_idx_row-1}"
+
+    # Number formats
+    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=8, max_col=9):
+        row[0].number_format = '#,##0.00'
+        row[1].number_format = '#,##0.00'
+    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=10, max_col=10):
+        row[0].number_format = '#,##0'
+    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=11, max_col=11):
+        row[0].number_format = '#,##0.00'
+    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=12, max_col=12):
+        row[0].number_format = '#,##0.00'
+
+    column_widths = {
+        "A": 14, "B": 32, "C": 14, "D": 14, "E": 12, "F": 16,
+        "G": 16, "H": 22, "I": 18, "J": 18, "K": 18, "L": 20, "M": 26
+    }
+    for col, width in column_widths.items():
+        ws_index.column_dimensions[col].width = width
+
+    # ---------------- SHEET 2: Sale Transactions ----------------
+    ws_sales = workbook.create_sheet(title="Sale Transactions")
+    ws_sales.append([
+        "Sale ID",
+        "Sale Date (IST)",
+        "Sale Time (IST)",
+        "Employee ID",
+        "Employee",
+        "Location",
+        "Index & Items Breakdown",
+        "Total Pieces",
+        "Total Cost (INR)",
+        "Line Items Count",
+    ])
+
     for sale in sales:
-        worksheet.append([
+        ist_dt = to_ist(sale.sale_date)
+        items_breakdown = ", ".join(
+            f"{it.product.index_no or ''} {it.product.name if it.product else 'Product'} ({it.quantity} pcs)"
+            for it in sale.items
+        )
+        ws_sales.append([
             sale.id,
-            sale.sale_date.date() if sale.sale_date else None,
-            sale.sale_date.time().replace(microsecond=0) if sale.sale_date else None,
+            format_ist_date(sale.sale_date),
+            format_ist_time(sale.sale_date),
             sale.employee.employee_id if sale.employee else "",
             sale.employee.name if sale.employee else "Unknown",
             sale.location.name if sale.location else "Unknown",
+            items_breakdown,
             sale.total_pieces or 0,
             _sale_cost(sale),
             len(sale.items),
         ])
-    for cell in worksheet[1]:
+
+    total_sales_row = len(sales) + 2
+    if len(sales) > 0:
+        ws_sales.append([
+            "TOTAL",
+            "", "", "", "", "", "TOTAL TRANSACTIONS",
+            f"=SUM(H2:H{total_sales_row-1})",
+            f"=SUM(I2:I{total_sales_row-1})",
+            f"=SUM(J2:J{total_sales_row-1})",
+        ])
+        for cell in ws_sales[total_sales_row]:
+            cell.font = cell.font.copy(bold=True)
+
+    for cell in ws_sales[1]:
         cell.font = cell.font.copy(bold=True)
-    worksheet.freeze_panes = "A2"
-    worksheet.auto_filter.ref = worksheet.dimensions
-    worksheet.column_dimensions["A"].width = 12
-    worksheet.column_dimensions["B"].width = 14
-    worksheet.column_dimensions["C"].width = 12
-    worksheet.column_dimensions["D"].width = 14
-    worksheet.column_dimensions["E"].width = 22
-    worksheet.column_dimensions["F"].width = 18
-    worksheet.column_dimensions["G"].width = 14
-    worksheet.column_dimensions["H"].width = 18
-    worksheet.column_dimensions["I"].width = 12
-    for row in worksheet.iter_rows(min_row=2, min_col=2, max_col=3):
-        row[0].number_format = "yyyy-mm-dd"
-        row[1].number_format = "hh:mm:ss"
-    for row in worksheet.iter_rows(min_row=2, min_col=8, max_col=8):
+
+    ws_sales.freeze_panes = "A2"
+    if len(sales) > 0:
+        ws_sales.auto_filter.ref = f"A1:J{total_sales_row-1}"
+
+    ws_sales.column_dimensions["A"].width = 12
+    ws_sales.column_dimensions["B"].width = 16
+    ws_sales.column_dimensions["C"].width = 16
+    ws_sales.column_dimensions["D"].width = 14
+    ws_sales.column_dimensions["E"].width = 22
+    ws_sales.column_dimensions["F"].width = 20
+    ws_sales.column_dimensions["G"].width = 40
+    ws_sales.column_dimensions["H"].width = 14
+    ws_sales.column_dimensions["I"].width = 18
+    ws_sales.column_dimensions["J"].width = 16
+
+    for row in ws_sales.iter_rows(min_row=2, max_row=total_sales_row, min_col=8, max_col=8):
+        row[0].number_format = '#,##0'
+    for row in ws_sales.iter_rows(min_row=2, max_row=total_sales_row, min_col=9, max_col=9):
         row[0].number_format = '#,##0.00'
+
     output = io.BytesIO()
     workbook.save(output)
     output.seek(0)
@@ -185,9 +481,9 @@ def get_admin_dashboard_stats(db: Session = Depends(get_db)):
     ).scalar()
     total_stock = total_stock_result if total_stock_result is not None else 0
 
-    today = datetime.now().date()
-    start_today = datetime.combine(today, datetime.min.time())
-    end_today = datetime.combine(today, datetime.max.time())
+    ist_today = to_ist(datetime.utcnow()).date()
+    start_today = ist_date_to_utc_bounds(str(ist_today), is_end_date=False)
+    end_today = ist_date_to_utc_bounds(str(ist_today), is_end_date=True)
 
     pieces_sold_today = db.query(models.Sale).filter(
         models.Sale.sale_date >= start_today,
@@ -196,11 +492,14 @@ def get_admin_dashboard_stats(db: Session = Depends(get_db)):
         func.sum(models.Sale.total_pieces)
     ).scalar() or 0
 
-    start_month = datetime.today().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    if today.month == 12:
-        end_month = datetime(today.year + 1, 1, 1) - timedelta(seconds=1)
+    # Current month bounds in IST
+    start_month_ist = datetime(ist_today.year, ist_today.month, 1)
+    if ist_today.month == 12:
+        end_month_ist = datetime(ist_today.year + 1, 1, 1) - timedelta(seconds=1)
     else:
-        end_month = datetime(today.year, today.month + 1, 1) - timedelta(seconds=1)
+        end_month_ist = datetime(ist_today.year, ist_today.month + 1, 1) - timedelta(seconds=1)
+    start_month = ist_date_to_utc_bounds(start_month_ist.strftime("%Y-%m-%d"), is_end_date=False)
+    end_month = ist_date_to_utc_bounds(end_month_ist.strftime("%Y-%m-%d"), is_end_date=True)
 
     pieces_sold_this_month = db.query(models.Sale).filter(
         models.Sale.sale_date >= start_month,
@@ -209,8 +508,9 @@ def get_admin_dashboard_stats(db: Session = Depends(get_db)):
         func.sum(models.Sale.total_pieces)
     ).scalar() or 0
 
-    start_year = datetime.today().replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-    end_year = datetime.today().replace(month=12, day=31, hour=23, minute=59, second=59, microsecond=999999)
+    # Current year bounds in IST
+    start_year = ist_date_to_utc_bounds(f"{ist_today.year}-01-01", is_end_date=False)
+    end_year = ist_date_to_utc_bounds(f"{ist_today.year}-12-31", is_end_date=True)
 
     pieces_sold_this_year = db.query(models.Sale).filter(
         models.Sale.sale_date >= start_year,
@@ -239,7 +539,7 @@ def get_admin_dashboard_stats(db: Session = Depends(get_db)):
             "id": r.id,
             "employee_name": r.employee_name,
             "location_name": r.location_name,
-            "report_date": r.report_date,
+            "report_date": format_ist_datetime(r.report_date),
             "total_quantity": sum(i.quantity for i in r.items),
             "reasons": "; ".join(filter(None, [i.description for i in r.items])),
             "photos_count": len(r.photos),
@@ -258,9 +558,9 @@ def get_admin_dashboard_stats(db: Session = Depends(get_db)):
     # Real Database 7-Day Trend Analytics
     daily_trends = []
     for i in range(6, -1, -1):
-        target_date = today - timedelta(days=i)
-        day_start = datetime.combine(target_date, datetime.min.time())
-        day_end = datetime.combine(target_date, datetime.max.time())
+        target_date = ist_today - timedelta(days=i)
+        day_start = ist_date_to_utc_bounds(str(target_date), is_end_date=False)
+        day_end = ist_date_to_utc_bounds(str(target_date), is_end_date=True)
 
         day_sales = db.query(models.Sale).filter(
             models.Sale.sale_date >= day_start,

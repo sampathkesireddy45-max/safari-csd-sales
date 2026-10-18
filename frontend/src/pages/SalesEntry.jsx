@@ -12,6 +12,7 @@ import {
   Trash2,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Receipt,
   Search,
   Tag
@@ -24,7 +25,7 @@ const SalesEntry = () => {
 
   const [products, setProducts] = useState([]);
   const [inventories, setInventories] = useState([]);
-  const [saleItems, setSaleItems] = useState([{ productId: "", quantity: "" }]);
+  const [saleItems, setSaleItems] = useState([{ productId: "", quantity: "", unit: "pieces" }]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -54,7 +55,7 @@ const SalesEntry = () => {
   }, [user]);
 
   const handleAddItem = () => {
-    setSaleItems([...saleItems, { productId: "", quantity: "" }]);
+    setSaleItems([...saleItems, { productId: "", quantity: "", unit: "pieces" }]);
   };
 
   const handleRemoveItem = (index) => {
@@ -76,23 +77,48 @@ const SalesEntry = () => {
     setSaleItems(newItems);
   };
 
+  const handleUnitChange = (index, unit) => {
+    const newItems = [...saleItems];
+    newItems[index].unit = unit;
+    setSaleItems(newItems);
+  };
+
   // Helper calculations
+  const getProduct = (productId) => {
+    if (!productId) return null;
+    return products.find((p) => String(p.id) === String(productId));
+  };
+
+  const getProductStock = (productId) => {
+    if (!productId) return null;
+    const inv = inventories.find((i) => String(i.product_id) === String(productId));
+    if (inv) return inv.quantity;
+    const prod = getProduct(productId);
+    return prod?.total_stock ?? 0;
+  };
+
   const getItemPrice = (productId) => {
-    if (!productId) return 0;
-    const prod = products.find((p) => String(p.id) === String(productId));
+    const prod = getProduct(productId);
     if (!prod) return 0;
     return prod.selling_rate || prod.rate_per_pc || prod.unit_price || 0;
   };
 
-  const getItemSubtotal = (item) => {
+  const getItemEffectivePieces = (item) => {
     const qty = parseInt(item.quantity, 10);
-    if (!item.productId || isNaN(qty) || qty <= 0) return 0;
-    return getItemPrice(item.productId) * qty;
+    if (isNaN(qty) || qty <= 0) return 0;
+    const prod = getProduct(item.productId);
+    const pack = prod?.case_pack || 1;
+    return item.unit === "cases" ? qty * pack : qty;
+  };
+
+  const getItemSubtotal = (item) => {
+    const pieces = getItemEffectivePieces(item);
+    if (!item.productId || pieces <= 0) return 0;
+    return getItemPrice(item.productId) * pieces;
   };
 
   const totalPieces = saleItems.reduce((acc, item) => {
-    const qty = parseInt(item.quantity, 10);
-    return acc + (isNaN(qty) || qty <= 0 ? 0 : qty);
+    return acc + getItemEffectivePieces(item);
   }, 0);
 
   const grandTotalAmount = saleItems.reduce(
@@ -119,7 +145,7 @@ const SalesEntry = () => {
       location_id: user.assigned_location_id,
       items: validItems.map((item) => ({
         product_id: parseInt(item.productId, 10),
-        quantity: parseInt(item.quantity, 10),
+        quantity: getItemEffectivePieces(item),
       })),
     };
 
@@ -129,7 +155,7 @@ const SalesEntry = () => {
         `Recorded ${totalPieces} PCS sale (₹${grandTotalAmount.toLocaleString("en-IN")}) successfully!`,
         "success"
       );
-      setSaleItems([{ productId: "", quantity: "" }]);
+      setSaleItems([{ productId: "", quantity: "", unit: "pieces" }]);
       // Refresh inventory
       const updatedInv = await getInventories();
       setInventories(updatedInv || []);
@@ -207,7 +233,7 @@ const SalesEntry = () => {
 
                     <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-start">
                       {/* Product Autocomplete with Index No. */}
-                      <div className="sm:col-span-8">
+                      <div className="sm:col-span-7">
                         <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">
                           Product (Search by Index No. or Name)
                         </label>
@@ -218,13 +244,56 @@ const SalesEntry = () => {
                           placeholder="Type Index No. (e.g. 36812) or item name..."
                           required={true}
                         />
+
+                        {/* Low Stock Warning Alert */}
+                        {item.productId && getProductStock(item.productId) !== null && getProductStock(item.productId) < 5 && (
+                          <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between text-xs text-red-700">
+                            <div className="flex items-center gap-1.5">
+                              <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                              <span className="font-medium">
+                                <strong className="font-bold">Low Stock Alert:</strong> {getProductStock(item.productId) === 0 ? "Out of Stock (0 PCS)" : `Only ${getProductStock(item.productId)} pcs in stock (<5)`}
+                              </span>
+                            </div>
+                            <span className="font-mono font-bold text-red-800 bg-red-100 px-2 py-0.5 rounded text-[10px]">
+                              {getProductStock(item.productId)} PCS
+                            </span>
+                          </div>
+                        )}
                       </div>
 
-                      {/* Quantity Input */}
-                      <div className="sm:col-span-4">
-                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">
-                          Quantity
-                        </label>
+                      {/* Unit Selector & Quantity Input */}
+                      <div className="sm:col-span-5">
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600">
+                            Count & Unit
+                          </label>
+                          {/* Unit toggle */}
+                          <div className="inline-flex p-0.5 bg-slate-200/70 rounded-lg text-[10px]">
+                            <button
+                              type="button"
+                              onClick={() => handleUnitChange(index, "pieces")}
+                              className={`px-2 py-0.5 rounded font-semibold transition ${
+                                item.unit !== "cases"
+                                  ? "bg-white text-indigo-700 shadow-xs font-bold"
+                                  : "text-slate-600 hover:text-slate-900"
+                              }`}
+                            >
+                              Pcs
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUnitChange(index, "cases")}
+                              className={`px-2 py-0.5 rounded font-semibold transition ${
+                                item.unit === "cases"
+                                  ? "bg-indigo-600 text-white shadow-xs font-bold"
+                                  : "text-slate-600 hover:text-slate-900"
+                              }`}
+                            >
+                              Cases
+                            </button>
+                          </div>
+                        </div>
+
                         <div className="relative">
                           <input
                             type="number"
@@ -232,23 +301,43 @@ const SalesEntry = () => {
                             required
                             value={item.quantity}
                             onChange={(e) => handleQuantityChange(index, e.target.value)}
-                            placeholder="Qty"
-                            className="w-full text-xs px-3 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition"
+                            placeholder={item.unit === "cases" ? "Boxes" : "Pieces"}
+                            className="w-full text-xs px-3 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition font-mono pr-16"
                           />
-                          <span className="absolute inset-y-0 right-0 pr-3 flex items-center text-[11px] font-semibold text-slate-400 pointer-events-none">
-                            PCS
+                          <span className="absolute inset-y-0 right-0 pr-3 flex items-center text-[10px] font-bold uppercase tracking-wider text-indigo-600 pointer-events-none">
+                            {item.unit === "cases" ? "CASES" : "PCS"}
                           </span>
                         </div>
+
+                        {/* Exceeds Stock Alert */}
+                        {item.productId && getProductStock(item.productId) !== null && getItemEffectivePieces(item) > getProductStock(item.productId) && (
+                          <div className="text-[11px] font-bold text-red-600 mt-1.5 flex items-center gap-1 bg-red-50 p-1.5 rounded-lg border border-red-200">
+                            <AlertCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                            <span>Requested ({getItemEffectivePieces(item)} pcs) exceeds stock ({getProductStock(item.productId)} pcs)!</span>
+                          </div>
+                        )}
+
+                        {/* Case to piece feedback */}
+                        {item.productId && item.unit === "cases" && item.quantity > 0 && (
+                          <div className="text-[10px] font-mono text-indigo-600 mt-1 font-semibold">
+                            📦 {item.quantity} Cases = {getItemEffectivePieces(item)} Pieces (pack of {getProduct(item.productId)?.case_pack || 1})
+                          </div>
+                        )}
                       </div>
                     </div>
 
                     {/* Line Subtotal Footer */}
                     {item.productId && (
-                      <div className="mt-3 pt-2.5 border-t border-slate-200/60 flex items-center justify-between text-xs">
-                        <div className="text-slate-500">
+                      <div className="mt-3 pt-2.5 border-t border-slate-200/60 flex flex-wrap items-center justify-between text-xs gap-2">
+                        <div className="text-slate-500 flex items-center gap-2">
                           {unitPrice > 0 ? (
                             <span>
-                              CSD Unit Rate: <span className="font-semibold text-slate-700">₹{unitPrice.toLocaleString("en-IN")}</span>
+                              CSD Rate: <span className="font-semibold text-slate-700">₹{unitPrice.toLocaleString("en-IN")} / pc</span>
+                              {getProduct(item.productId)?.case_pack > 1 && (
+                                <span className="text-slate-400 ml-1">
+                                  (₹{(unitPrice * getProduct(item.productId).case_pack).toLocaleString("en-IN")} / case)
+                                </span>
+                              )}
                             </span>
                           ) : (
                             <span className="text-slate-400">Unit rate not specified</span>
@@ -256,8 +345,8 @@ const SalesEntry = () => {
                         </div>
                         <div className="font-semibold text-slate-800">
                           Line Total:{" "}
-                          <span className="text-emerald-700 font-bold font-mono">
-                            ₹{subtotal.toLocaleString("en-IN")}
+                          <span className="text-emerald-700 font-bold font-mono text-sm">
+                            ₹{subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
                         </div>
                       </div>

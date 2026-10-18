@@ -7,6 +7,11 @@ class ProductBase(BaseModel):
     index_no: Optional[str] = None
     name: str
     description: Optional[str] = None
+    brand: Optional[str] = None
+    colour: Optional[str] = None
+    category: Optional[str] = None
+    sub_category: Optional[str] = None
+    case_pack: Optional[int] = 1
     rate_per_pc: Optional[float] = None
     selling_rate: Optional[float] = None
     is_active: Optional[bool] = True
@@ -19,17 +24,25 @@ class ProductUpdate(BaseModel):
     index_no: Optional[str] = None
     name: Optional[str] = None
     description: Optional[str] = None
+    brand: Optional[str] = None
+    colour: Optional[str] = None
+    category: Optional[str] = None
+    sub_category: Optional[str] = None
+    case_pack: Optional[int] = None
     rate_per_pc: Optional[float] = None
     selling_rate: Optional[float] = None
     is_active: Optional[bool] = None
 
 class ProductInDBBase(ProductBase):
     id: int
+    total_stock: Optional[int] = 0
     created_at: datetime
     updated_at: datetime
 
     class Config:
         orm_mode = True
+        from_attributes = True
 
 class Product(ProductInDBBase):
     pass
+

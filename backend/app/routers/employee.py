@@ -10,6 +10,7 @@ from ..models.damage_report_item import DamageReportItem
 from ..utils.database import get_db
 from ..utils.auth import get_current_active_user, get_current_active_admin_user
 from .. import schemas, crud
+from ..crud.employee import reactivate_employee
 from datetime import datetime, timedelta
 
 router = APIRouter(
@@ -29,12 +30,20 @@ def read_employees(skip: int = 0, limit: int = 100, db: Session = Depends(get_db
 
 @router.post("/", response_model=schemas.Employee)
 def create_employee(employee: schemas.EmployeeCreate, db: Session = Depends(get_db), current_user: Employee = Depends(get_current_active_admin_user)):
-    existing = db.query(Employee).filter(
-        (Employee.email == employee.email) | (Employee.employee_id == employee.employee_id)
-    ).first()
-    if existing:
+    existing_by_id = db.query(Employee).filter(Employee.employee_id == employee.employee_id).first()
+    existing_by_email = db.query(Employee).filter(Employee.email == employee.email).first()
+    active_conflict = next(
+        (record for record in (existing_by_id, existing_by_email) if record and record.status == "active"),
+        None,
+    )
+    if active_conflict:
         raise HTTPException(status_code=400, detail="Employee with this email or ID already exists")
+    if existing_by_id and existing_by_email and existing_by_id.id != existing_by_email.id:
+        raise HTTPException(status_code=400, detail="The employee ID and email belong to different existing accounts")
     try:
+        inactive_match = existing_by_id or existing_by_email
+        if inactive_match:
+            return reactivate_employee(db=db, employee=inactive_match, employee_data=employee)
         return crud.create_employee(db=db, employee=employee)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -210,14 +219,22 @@ def get_employee_dashboard_stats(employee_id: int, db: Session = Depends(get_db)
             Inventory.location_id == employee.assigned_location_id
         ).all()
         for inventory, product in stock_items:
+            pack = product.case_pack or 1
             current_stock.append({
                 "id": inventory.id,
                 "product_id": product.id,
                 "product_name": product.name,
                 "index_no": product.index_no,
+                "brand": product.brand,
+                "colour": product.colour,
+                "category": product.category,
+                "sub_category": product.sub_category,
+                "case_pack": pack,
                 "selling_rate": product.selling_rate,
                 "rate_per_pc": product.rate_per_pc,
-                "quantity": inventory.quantity
+                "quantity": inventory.quantity,
+                "cases": inventory.quantity // pack,
+                "remainder_pieces": inventory.quantity % pack
             })
 
     # Damages reported by this employee (excluding replaced)

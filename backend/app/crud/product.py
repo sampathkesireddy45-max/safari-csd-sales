@@ -7,14 +7,22 @@ def get_product(db: Session, product_id: int):
 def get_product_by_product_id(db: Session, product_id: str):
     return db.query(models.Product).filter(models.Product.product_id == product_id).first()
 
-def get_products(db: Session, skip: int = 0, limit: int = 500, q: str = None):
+def get_products(db: Session, skip: int = 0, limit: int = 500, q: str = None, brand: str = None, category: str = None):
     query = db.query(models.Product)
+    if brand and brand.strip():
+        query = query.filter(models.Product.brand.ilike(f"%{brand.strip()}%"))
+    if category and category.strip():
+        query = query.filter(models.Product.category.ilike(f"%{category.strip()}%"))
     if q and q.strip():
         term = f"%{q.strip()}%"
         query = query.filter(
             (models.Product.index_no.ilike(term)) |
             (models.Product.name.ilike(term)) |
-            (models.Product.product_id.ilike(term))
+            (models.Product.product_id.ilike(term)) |
+            (models.Product.colour.ilike(term)) |
+            (models.Product.brand.ilike(term)) |
+            (models.Product.category.ilike(term)) |
+            (models.Product.sub_category.ilike(term))
         )
     return query.offset(skip).limit(limit).all()
 

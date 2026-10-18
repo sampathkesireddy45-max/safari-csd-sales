@@ -302,6 +302,19 @@ export const createProduct = async (productData) => {
   });
 };
 
+export const updateProduct = async (productId, productData) => {
+  return await fetchApi(`/products/${productId}`, {
+    method: "PUT",
+    body: JSON.stringify(productData),
+  });
+};
+
+export const deleteProduct = async (productId) => {
+  return await fetchApi(`/products/${productId}`, {
+    method: "DELETE",
+  });
+};
+
 // --- Inventory API ---
 export const getInventories = async (params = {}) => {
   const searchParams = new URLSearchParams();
@@ -361,6 +374,14 @@ export const exportAdminSalesXlsx = async (params = {}) => {
   return fetchApi(`/admin/dashboard/sales/export/xlsx${search.toString() ? `?${search}` : ""}`);
 };
 
+export const exportAdminSalesIndexWiseCsv = async (params = {}) => {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") search.append(key, value);
+  });
+  return fetchApi(`/admin/dashboard/sales/export/index-wise/csv${search.toString() ? `?${search}` : ""}`);
+};
+
 export const getSystemHealth = async () => fetchApi("/api/health");
 
 export const getAdminAuditLogs = async () => fetchApi("/damages/audit-logs");
@@ -395,6 +416,8 @@ export default {
   createLocation,
   getProducts,
   createProduct,
+  updateProduct,
+  deleteProduct,
   getInventories,
   updateStock,
   resetInventoryToZero,

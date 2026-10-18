@@ -7,7 +7,9 @@ import {
   getAdminSalesSummary,
   exportAdminSalesXlsx,
   resetInventoryToZero,
-  markDamageReplaced
+  markDamageReplaced,
+  updateProduct,
+  createProduct
 } from "../services/api";
 import { Link } from "react-router-dom";
 import Layout from "../components/Layout";
@@ -37,8 +39,16 @@ import {
   PackagePlus,
   Edit3,
   RotateCcw,
-  CheckCircle2
-  ,Download, FileSpreadsheet, User
+  CheckCircle2,
+  Download,
+  FileSpreadsheet,
+  User,
+  Plus,
+  Boxes,
+  SlidersHorizontal,
+  DollarSign,
+  Sparkles,
+  PackageCheck
 } from "lucide-react";
 
 const AdminDashboard = () => {
@@ -66,6 +76,140 @@ const AdminDashboard = () => {
   // Stock Entry Modal State
   const [stockModalOpen, setStockModalOpen] = useState(false);
   const [stockProductToEdit, setStockProductToEdit] = useState(null);
+
+  // Cases vs Pieces Unit Toggle & Filters
+  const [catalogUnit, setCatalogUnit] = useState("pieces"); // "pieces" or "cases"
+  const [brandFilter, setBrandFilter] = useState("ALL");
+  const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [stockFilter, setStockFilter] = useState("ALL"); // "ALL" | "LOW" | "OVERSTOCK"
+
+  // Price Edit Modal State
+  const [editingPriceProduct, setEditingPriceProduct] = useState(null);
+  const [priceEditPieceRate, setPriceEditPieceRate] = useState("");
+  const [priceEditCaseRate, setPriceEditCaseRate] = useState("");
+  const [priceSaving, setPriceSaving] = useState(false);
+
+  // Add Product Modal State
+  const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
+  const [addProductSaving, setAddProductSaving] = useState(false);
+  const [newProductForm, setNewProductForm] = useState({
+    index_no: "",
+    name: "",
+    brand: "SAFARI",
+    colour: "",
+    category: "HL",
+    sub_category: "PC UPRIGHT",
+    case_pack: 4,
+    selling_rate: "",
+  });
+
+  const openPriceEditModal = (prod) => {
+    setEditingPriceProduct(prod);
+    const pieceRate = prod.selling_rate !== null && prod.selling_rate !== undefined ? String(prod.selling_rate) : "";
+    setPriceEditPieceRate(pieceRate);
+    const pack = prod.case_pack || 1;
+    if (pieceRate && !isNaN(parseFloat(pieceRate))) {
+      setPriceEditCaseRate((parseFloat(pieceRate) * pack).toFixed(2));
+    } else {
+      setPriceEditCaseRate("");
+    }
+  };
+
+  const handlePieceRateChange = (val) => {
+    setPriceEditPieceRate(val);
+    const pack = editingPriceProduct?.case_pack || 1;
+    if (val && !isNaN(parseFloat(val))) {
+      setPriceEditCaseRate((parseFloat(val) * pack).toFixed(2));
+    } else {
+      setPriceEditCaseRate("");
+    }
+  };
+
+  const handleCaseRateChange = (val) => {
+    setPriceEditCaseRate(val);
+    const pack = editingPriceProduct?.case_pack || 1;
+    if (val && !isNaN(parseFloat(val)) && pack > 0) {
+      setPriceEditPieceRate((parseFloat(val) / pack).toFixed(2));
+    } else {
+      setPriceEditPieceRate("");
+    }
+  };
+
+  const handleSavePrice = async (e) => {
+    e.preventDefault();
+    if (!editingPriceProduct) return;
+    const newPrice = parseFloat(priceEditPieceRate);
+    if (isNaN(newPrice) || newPrice < 0) {
+      addToast("Please enter a valid price (₹0 or greater)", "error");
+      return;
+    }
+    setPriceSaving(true);
+    try {
+      const updated = await updateProduct(editingPriceProduct.id, {
+        selling_rate: newPrice,
+        rate_per_pc: newPrice,
+      });
+      setProducts((prev) =>
+        prev.map((p) => (p.id === editingPriceProduct.id ? { ...p, selling_rate: newPrice, rate_per_pc: newPrice } : p))
+      );
+      addToast(`Price for #${editingPriceProduct.index_no} updated to ₹${newPrice.toLocaleString("en-IN")}/pc!`, "success");
+      setEditingPriceProduct(null);
+    } catch (err) {
+      console.error("Failed to update product price:", err);
+      addToast(err.message || "Failed to update price", "error");
+    } finally {
+      setPriceSaving(false);
+    }
+  };
+
+  const handleCreateProduct = async (e) => {
+    e.preventDefault();
+    if (!newProductForm.name.trim()) {
+      addToast("Please enter an item model name", "error");
+      return;
+    }
+    const pack = parseInt(newProductForm.case_pack, 10) || 1;
+    const rate = newProductForm.selling_rate ? parseFloat(newProductForm.selling_rate) : null;
+    const prefix = newProductForm.brand.toUpperCase().includes("SAFARI") ? "SAF" : "UJ";
+    const productId = newProductForm.index_no ? `${prefix}-${newProductForm.index_no.trim()}` : `PROD-${Date.now()}`;
+    const fullName = newProductForm.colour.trim() ? `${newProductForm.name.trim()} (${newProductForm.colour.trim()})` : newProductForm.name.trim();
+
+    setAddProductSaving(true);
+    try {
+      const payload = {
+        product_id: productId,
+        index_no: newProductForm.index_no.trim() || null,
+        name: fullName,
+        brand: newProductForm.brand.trim() || "SAFARI",
+        colour: newProductForm.colour.trim() || null,
+        category: newProductForm.category.trim() || "HL",
+        sub_category: newProductForm.sub_category.trim() || "PC UPRIGHT",
+        case_pack: pack,
+        selling_rate: rate,
+        rate_per_pc: rate,
+        description: `${newProductForm.brand} ${newProductForm.category} - ${newProductForm.sub_category} (Pack: ${pack} pcs)`,
+      };
+      const created = await createProduct(payload);
+      setProducts((prev) => [created, ...prev]);
+      addToast(`Added new product: ${created.name} (Index #${created.index_no || "N/A"})`, "success");
+      setIsAddProductModalOpen(false);
+      setNewProductForm({
+        index_no: "",
+        name: "",
+        brand: "SAFARI",
+        colour: "",
+        category: "HL",
+        sub_category: "PC UPRIGHT",
+        case_pack: 4,
+        selling_rate: "",
+      });
+    } catch (err) {
+      console.error("Failed to create product:", err);
+      addToast(err.message || "Failed to add product", "error");
+    } finally {
+      setAddProductSaving(false);
+    }
+  };
 
   // Lightbox State
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -249,7 +393,7 @@ const AdminDashboard = () => {
 
               <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm hover:shadow-md transition">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-500">Safari CSD SKUs</span>
+                  <span className="text-xs font-semibold text-slate-500">Safari CSD SKU's</span>
                   <div className="p-2 rounded-xl bg-amber-50 text-amber-600">
                     <Luggage className="w-5 h-5" />
                   </div>
@@ -258,7 +402,7 @@ const AdminDashboard = () => {
                   <span className="text-3xl font-extrabold text-slate-900 font-mono">
                     <AnimatedNumber value={products.length || stats.totalProducts} />
                   </span>
-                  <span className="text-xs text-slate-400 ml-2">CSD Index SKUs</span>
+                  <span className="text-xs text-slate-400 ml-2">CSD Index SKU's</span>
                 </div>
               </div>
 
@@ -372,6 +516,12 @@ const AdminDashboard = () => {
                 >
                   <Download className="w-3.5 h-3.5" /> Overall XLSX
                 </button>
+                <Link
+                  to="/admin/sales"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition shadow-sm"
+                >
+                  <Layers className="w-3.5 h-3.5 text-indigo-400" /> Index-Wise Sales →
+                </Link>
                 {selectedSalesEmployee && (
                   <button
                     type="button"
@@ -416,7 +566,14 @@ const AdminDashboard = () => {
                   <tbody className="divide-y divide-slate-100">
                     {salesSummary.sales.map((sale) => (
                       <tr key={sale.id}>
-                        <td className="py-3">{sale.sale_date ? new Date(sale.sale_date).toLocaleString() : "—"}</td>
+                        <td className="py-3">
+                          <div className="font-medium text-slate-800">
+                            {sale.formatted_date || (sale.sale_date ? new Date(sale.sale_date).toLocaleDateString() : "—")}
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            {sale.formatted_time || (sale.sale_date ? new Date(sale.sale_date).toLocaleTimeString() : "")}
+                          </div>
+                        </td>
                         <td className="font-medium">{sale.employee_name}</td>
                         <td>{sale.location_name}</td>
                         <td>{sale.item_count}</td>
@@ -511,97 +668,375 @@ const AdminDashboard = () => {
           <LiveEmployeeMapWidget />
 
           {/* Safari CSD Catalog & Rates Directory */}
-          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-            <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden">
+            {/* Header with Title and Mode Switcher */}
+            <div className="p-6 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-gradient-to-r from-slate-50/60 to-white">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-amber-50 rounded-xl text-amber-600">
-                  <Luggage className="w-5 h-5" />
+                <div className="p-3 bg-amber-500/10 text-amber-600 rounded-2xl border border-amber-200/60">
+                  <Luggage className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    Safari CSD Luggage Catalog & Official Rates
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    {products.length} products imported with official CSD Index Numbers and Canteen Selling Rates
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-slate-900">
+                      Safari CSD Luggage Catalog & Rates
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                      {products.length} SKU's
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Official CSD Index Numbers, Piece Rates, Case Packs & Box Conversions
                   </p>
                 </div>
               </div>
 
-              {/* Search by Index No or Item Name */}
-              <div className="w-full sm:w-72 relative">
+              {/* Conversion Controls & Add SKU Action */}
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Cases vs Pieces Global Toggle */}
+                <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-inner">
+                  <button
+                    type="button"
+                    onClick={() => setCatalogUnit("pieces")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                      catalogUnit === "pieces"
+                        ? "bg-white text-indigo-700 shadow-sm font-bold"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                    title="View prices and inventory counts per piece"
+                  >
+                    <PackageCheck className="w-3.5 h-3.5" />
+                    <span>Pieces (PCS)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCatalogUnit("cases")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                      catalogUnit === "cases"
+                        ? "bg-indigo-600 text-white shadow-sm font-bold"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                    title="View prices and inventory counts per case (box pack)"
+                  >
+                    <Boxes className="w-3.5 h-3.5" />
+                    <span>Cases (Boxes)</span>
+                  </button>
+                </div>
+
+                {/* Add New Product Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsAddProductModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm shadow-indigo-600/20 transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add New SKU</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter & Search Bar */}
+            <div className="p-4 bg-slate-50/50 border-b border-slate-100 flex flex-col md:flex-row items-center justify-between gap-3">
+              {/* Brand & Category Chips */}
+              <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                {/* Brand Filter */}
+                <div className="inline-flex items-center p-0.5 bg-white border border-slate-200 rounded-xl text-[11px] shadow-sm">
+                  {["ALL", "SAFARI", "URBEN JUNGLE"].map((b) => (
+                    <button
+                      key={b}
+                      type="button"
+                      onClick={() => setBrandFilter(b)}
+                      className={`px-2.5 py-1 rounded-lg font-semibold transition ${
+                        brandFilter === b
+                          ? "bg-indigo-50 text-indigo-700 font-bold"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      {b === "ALL" ? "All Brands" : b}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Category Filter */}
+                <div className="inline-flex items-center p-0.5 bg-white border border-slate-200 rounded-xl text-[11px] shadow-sm">
+                  {["ALL", "HL", "SL"].map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setCategoryFilter(c)}
+                      className={`px-2.5 py-1 rounded-lg font-semibold transition ${
+                        categoryFilter === c
+                          ? "bg-indigo-50 text-indigo-700 font-bold"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      {c === "ALL" ? "All Types" : c === "HL" ? "HL (Hard)" : "SL (Soft)"}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Low Stock Alert Filter Button (<5 pcs) */}
+                <button
+                  type="button"
+                  onClick={() => setStockFilter(stockFilter === "LOW" ? "ALL" : "LOW")}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold border transition shadow-sm ${
+                    stockFilter === "LOW"
+                      ? "bg-red-600 text-white border-red-600 shadow-red-200"
+                      : "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                  }`}
+                  title="Filter to show only products with less than 5 pieces in stock"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>Low Stock (&lt;5 pcs): {products.filter((p) => (p.total_stock ?? 0) < 5).length}</span>
+                </button>
+
+                {/* Overstock Filter Button (>10 pcs) */}
+                <button
+                  type="button"
+                  onClick={() => setStockFilter(stockFilter === "OVERSTOCK" ? "ALL" : "OVERSTOCK")}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold border transition shadow-sm ${
+                    stockFilter === "OVERSTOCK"
+                      ? "bg-amber-600 text-white border-amber-600 shadow-amber-200"
+                      : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
+                  }`}
+                  title="Filter to show only products with greater than 10 pieces in stock (Overstock)"
+                >
+                  <PackageCheck className="w-3.5 h-3.5" />
+                  <span>Overstock (&gt;10 pcs): {products.filter((p) => (p.total_stock ?? 0) > 10).length}</span>
+                </button>
+              </div>
+
+              {/* Search Box */}
+              <div className="w-full md:w-80 relative">
                 <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
                   value={productSearch}
                   onChange={(e) => setProductSearch(e.target.value)}
-                  placeholder="Search Index No. (e.g. 36812) or item..."
-                  className="w-full text-xs pl-9 pr-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 transition"
+                  placeholder="Search Index No., model, colour..."
+                  className="w-full text-xs pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 transition shadow-sm"
                 />
               </div>
             </div>
 
-            <div className="overflow-x-auto max-h-96 overflow-y-auto">
+            {/* Catalog Table */}
+            <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
               <table className="w-full text-left text-xs text-slate-700">
-                <thead className="sticky top-0 bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200 z-10">
+                <thead className="sticky top-0 bg-slate-100 text-[11px] uppercase tracking-wider text-slate-600 border-b border-slate-200 z-10 font-bold shadow-sm">
                   <tr>
-                    <th className="px-6 py-3 font-semibold">CSD Index No.</th>
-                    <th className="px-6 py-3 font-semibold">Luggage Item / Model</th>
-                    <th className="px-6 py-3 font-semibold">Base Rate / PC</th>
-                    <th className="px-6 py-3 font-semibold">Canteen Selling Rate</th>
-                    <th className="px-6 py-3 font-semibold">Status</th>
-                    <th className="px-6 py-3 font-semibold text-right">Inventory Action</th>
+                    <th className="px-6 py-3.5">CSD Index</th>
+                    <th className="px-6 py-3.5">Model & Specifications</th>
+                    <th className="px-4 py-3.5">Brand / Category</th>
+                    <th className="px-4 py-3.5 text-center">Case Pack</th>
+                    <th className="px-5 py-3.5 text-center">Current Stock</th>
+                    <th className="px-5 py-3.5 text-center">Stock Status</th>
+                    <th className="px-6 py-3.5">
+                      {catalogUnit === "cases" ? "Rate Per Case (Box)" : "Official Rate / PC"}
+                    </th>
+                    <th className="px-6 py-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {products
                     .filter((p) => {
+                      if (stockFilter === "LOW" && (p.total_stock ?? 0) >= 5) return false;
+                      if (stockFilter === "OVERSTOCK" && (p.total_stock ?? 0) <= 10) return false;
+                      if (brandFilter !== "ALL" && p.brand?.toUpperCase() !== brandFilter) return false;
+                      if (categoryFilter !== "ALL" && p.category?.toUpperCase() !== categoryFilter) return false;
                       if (!productSearch.trim()) return true;
                       const term = productSearch.toLowerCase().trim();
                       const indexMatch = p.index_no && String(p.index_no).toLowerCase().includes(term);
                       const nameMatch = p.name && p.name.toLowerCase().includes(term);
-                      return indexMatch || nameMatch;
+                      const colourMatch = p.colour && p.colour.toLowerCase().includes(term);
+                      const subCatMatch = p.sub_category && p.sub_category.toLowerCase().includes(term);
+                      return indexMatch || nameMatch || colourMatch || subCatMatch;
                     })
-                    .map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-50/80 transition">
-                        <td className="px-6 py-3 font-mono">
-                          {p.index_no ? (
-                            <span className="px-2 py-0.5 rounded-md font-bold bg-indigo-100 text-indigo-800 text-[11px]">
-                              #{p.index_no}
+                    .map((p) => {
+                      const pack = p.case_pack || 1;
+                      const pieceRate = p.selling_rate;
+                      const caseRate = pieceRate !== null && pieceRate !== undefined ? pieceRate * pack : null;
+
+                      return (
+                        <tr
+                          key={p.id}
+                          className={`transition group ${
+                            (p.total_stock ?? 0) < 5
+                              ? "bg-red-50/40 hover:bg-red-50/70 border-l-4 border-l-red-500"
+                              : (p.total_stock ?? 0) > 10
+                              ? "bg-amber-50/30 hover:bg-amber-50/60 border-l-4 border-l-amber-500"
+                              : "hover:bg-slate-50/90"
+                          }`}
+                        >
+                          {/* Index No */}
+                          <td className="px-6 py-3 font-mono">
+                            {p.index_no ? (
+                              <span className="px-2 py-0.5 rounded-md font-bold bg-indigo-50 text-indigo-800 border border-indigo-200/80 text-[11px] shadow-sm">
+                                #{p.index_no}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 italic">None</span>
+                            )}
+                          </td>
+
+                          {/* Model & Specifications */}
+                          <td className="px-6 py-3">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-slate-900 group-hover:text-indigo-600 transition">
+                                {p.name}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5">
+                              {p.colour && (
+                                <span className="px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 font-medium">
+                                  {p.colour}
+                                </span>
+                              )}
+                              {p.sub_category && <span>• {p.sub_category}</span>}
+                            </div>
+                          </td>
+
+                          {/* Brand & Category */}
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="font-bold text-[10px] text-slate-800 uppercase tracking-wider">
+                                {p.brand || "SAFARI"}
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                {p.category === "HL" ? "Hard Luggage" : p.category === "SL" ? "Soft Luggage" : p.category || "—"}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Case Pack */}
+                          <td className="px-4 py-3 text-center">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md font-mono text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                              {pack} PCS / Case
                             </span>
-                          ) : (
-                            <span className="text-slate-400 italic">None</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-3 font-medium text-slate-900">
-                          {p.name}
-                        </td>
-                        <td className="px-6 py-3 text-slate-600 font-mono">
-                          {p.rate_per_pc ? `₹${p.rate_per_pc.toLocaleString("en-IN")}` : "—"}
-                        </td>
-                        <td className="px-6 py-3 font-semibold text-emerald-700 font-mono">
-                          {p.selling_rate ? `₹${p.selling_rate.toLocaleString("en-IN")}` : "—"}
-                        </td>
-                        <td className="px-6 py-3">
-                          <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800">
-                            Active
-                          </span>
-                        </td>
-                        <td className="px-6 py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setStockProductToEdit(p);
-                              setStockModalOpen(true);
-                            }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition"
-                            title="Enter or adjust inventory pieces for this item"
-                          >
-                            <PackagePlus className="w-3.5 h-3.5" />
-                            <span>Enter Pieces</span>
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+
+                          {/* Current Stock (Clean Count & Conversion) */}
+                          <td className="px-5 py-3 text-center font-mono">
+                            <div className="flex flex-col items-center gap-0.5">
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-full font-bold text-xs bg-slate-100 text-slate-800 border border-slate-200">
+                                {p.total_stock ?? 0} PCS
+                              </span>
+                              {pack > 1 && (
+                                <span className="text-[10px] text-slate-400 font-normal">
+                                  ≈ {Math.floor((p.total_stock ?? 0) / pack)} Cases ({(p.total_stock ?? 0) % pack} pcs)
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Stock Status (Separate Column: Low Stock <5 / Overstock >10 / Normal 5-10) */}
+                          <td className="px-5 py-3 text-center font-mono whitespace-nowrap">
+                            {(p.total_stock ?? 0) < 5 ? (
+                              <div className="flex flex-col items-center gap-0.5">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold text-[11px] bg-red-100 text-red-700 border border-red-300 shadow-xs">
+                                  <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                                  <span>{(p.total_stock ?? 0) === 0 ? "Out of Stock (0)" : "Low Stock (<5)"}</span>
+                                </span>
+                                <span className="text-[10px] text-red-600 font-bold">
+                                  {(p.total_stock ?? 0) === 0 ? "Needs Restocking" : `Only ${p.total_stock} pcs left`}
+                                </span>
+                              </div>
+                            ) : (p.total_stock ?? 0) > 10 ? (
+                              <div className="flex flex-col items-center gap-0.5">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold text-[11px] bg-amber-100 text-amber-800 border border-amber-300 shadow-xs">
+                                  <PackageCheck className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                                  <span>Overstock (&gt;10)</span>
+                                </span>
+                                <span className="text-[10px] text-amber-700 font-medium">
+                                  High Inventory ({p.total_stock} pcs)
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center gap-0.5">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-semibold text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span>Normal (5–10)</span>
+                                </span>
+                                <span className="text-[10px] text-emerald-700 font-normal">
+                                  Optimal Stock
+                                </span>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Rate Per Piece / Case */}
+                          <td className="px-6 py-3 font-mono">
+                            {catalogUnit === "cases" ? (
+                              <div>
+                                {caseRate !== null ? (
+                                  <>
+                                    <div className="font-bold text-sm text-indigo-700">
+                                      ₹{caseRate.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      <span className="text-[10px] font-normal text-slate-400 ml-1">/ Case</span>
+                                    </div>
+                                    <div className="text-[10px] text-slate-400">
+                                      (₹{pieceRate?.toLocaleString("en-IN", { minimumFractionDigits: 2 })} / pc)
+                                    </div>
+                                  </>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 font-semibold text-[10px] border border-amber-200">
+                                    Price Not Set
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <div>
+                                {pieceRate !== null ? (
+                                  <>
+                                    <div className="font-bold text-sm text-emerald-700">
+                                      ₹{pieceRate.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      <span className="text-[10px] font-normal text-slate-400 ml-1">/ PC</span>
+                                    </div>
+                                    {caseRate !== null && (
+                                      <div className="text-[10px] text-slate-400">
+                                        (₹{caseRate.toLocaleString("en-IN", { minimumFractionDigits: 2 })} / Case of {pack})
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 font-semibold text-[10px] border border-amber-200">
+                                    Price Not Set
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Actions: Edit Price & Enter Stock */}
+                          <td className="px-6 py-3 text-right">
+                            <div className="inline-flex items-center gap-1.5">
+                              {/* Edit Price Button */}
+                              <button
+                                type="button"
+                                onClick={() => openPriceEditModal(p)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition"
+                                title="Update or set price (auto-calculates piece & case)"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                                <span>Price</span>
+                              </button>
+
+                              {/* Enter Stock Button */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setStockProductToEdit(p);
+                                  setStockModalOpen(true);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition"
+                                title="Enter pieces or cases into inventory"
+                              >
+                                <PackagePlus className="w-3.5 h-3.5" />
+                                <span>Stock</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>
@@ -731,6 +1166,321 @@ const AdminDashboard = () => {
         isAdmin={true}
         initialProduct={stockProductToEdit}
       />
+
+      {/* Synchronized Price Edit Modal (Piece & Case) */}
+      {editingPriceProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/60">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl">
+                  <DollarSign className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Update CSD Selling Rate
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Automatic live conversion between Piece and Case prices
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingPriceProduct(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePrice} className="p-6 space-y-4">
+              {/* Product Info Summary */}
+              <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-2xl text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono font-bold text-indigo-900 bg-indigo-200/80 px-2 py-0.5 rounded-md text-[10px]">
+                    INDEX #{editingPriceProduct.index_no || "N/A"}
+                  </span>
+                  <span className="font-mono font-semibold text-slate-600 bg-white px-2 py-0.5 rounded-md border border-indigo-100">
+                    Pack: {editingPriceProduct.case_pack || 1} pcs/case
+                  </span>
+                </div>
+                <div className="font-bold text-slate-900 text-sm pt-0.5">
+                  {editingPriceProduct.name}
+                </div>
+                <div className="text-slate-500 text-[11px]">
+                  {editingPriceProduct.brand} • {editingPriceProduct.category} • {editingPriceProduct.sub_category}
+                </div>
+              </div>
+
+              {/* Synchronized Pricing Inputs */}
+              <div className="space-y-3 pt-1">
+                {/* Rate per Piece */}
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Rate Per Piece (PCS) <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-xs font-bold text-slate-400">
+                      ₹
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      value={priceEditPieceRate}
+                      onChange={(e) => handlePieceRateChange(e.target.value)}
+                      placeholder="e.g. 2693.85"
+                      className="w-full text-sm font-semibold pl-8 pr-16 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition font-mono"
+                    />
+                    <span className="absolute inset-y-0 right-0 pr-3 flex items-center text-[10px] font-bold text-slate-400 pointer-events-none">
+                      / PC
+                    </span>
+                  </div>
+                </div>
+
+                {/* Rate per Case (Box) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
+                      Rate Per Case ({editingPriceProduct.case_pack || 1} Pcs/Box)
+                    </label>
+                    <span className="text-[10px] text-indigo-600 font-semibold bg-indigo-50 px-1.5 py-0.2 rounded">
+                      Auto-syncs
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-xs font-bold text-slate-400">
+                      ₹
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={priceEditCaseRate}
+                      onChange={(e) => handleCaseRateChange(e.target.value)}
+                      placeholder="e.g. 10775.40"
+                      className="w-full text-sm font-semibold pl-8 pr-16 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition font-mono"
+                    />
+                    <span className="absolute inset-y-0 right-0 pr-3 flex items-center text-[10px] font-bold text-indigo-600 pointer-events-none">
+                      / CASE
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Conversion Preview Tag */}
+              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-center text-xs text-slate-600">
+                1 Case = {editingPriceProduct.case_pack || 1} Pieces × ₹{parseFloat(priceEditPieceRate || 0).toFixed(2)} ={" "}
+                <strong className="text-indigo-700">₹{parseFloat(priceEditCaseRate || 0).toFixed(2)}</strong>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingPriceProduct(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={priceSaving || !priceEditPieceRate}
+                  className="px-5 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition disabled:opacity-50"
+                >
+                  {priceSaving ? "Saving Price..." : "Save Product Price"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add New SKU Modal */}
+      {isAddProductModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/60">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl">
+                  <Plus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Add New Luggage SKU
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Add new product with official CSD details and case pack
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddProductModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateProduct} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+              {/* Row 1: Index No & Brand */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    CSD Index No.
+                  </label>
+                  <input
+                    type="text"
+                    value={newProductForm.index_no}
+                    onChange={(e) => setNewProductForm({ ...newProductForm, index_no: e.target.value })}
+                    placeholder="e.g. 38815"
+                    className="w-full text-xs font-mono px-3 py-2 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Brand
+                  </label>
+                  <select
+                    value={newProductForm.brand}
+                    onChange={(e) => setNewProductForm({ ...newProductForm, brand: e.target.value })}
+                    className="w-full text-xs px-3 py-2 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition"
+                  >
+                    <option value="SAFARI">SAFARI</option>
+                    <option value="URBEN JUNGLE">URBEN JUNGLE</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Row 2: Item Name & Colour */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Model / Item Name <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newProductForm.name}
+                    onChange={(e) => setNewProductForm({ ...newProductForm, name: e.target.value })}
+                    placeholder="e.g. SENTINEL 79 4W"
+                    className="w-full text-xs px-3 py-2 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Colour
+                  </label>
+                  <input
+                    type="text"
+                    value={newProductForm.colour}
+                    onChange={(e) => setNewProductForm({ ...newProductForm, colour: e.target.value })}
+                    placeholder="e.g. MIDNIGHT BLUE"
+                    className="w-full text-xs px-3 py-2 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition"
+                  />
+                </div>
+              </div>
+
+              {/* Row 3: Category & Sub-Category */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Category
+                  </label>
+                  <select
+                    value={newProductForm.category}
+                    onChange={(e) => setNewProductForm({ ...newProductForm, category: e.target.value })}
+                    className="w-full text-xs px-3 py-2 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition"
+                  >
+                    <option value="HL">HL (Hard Luggage)</option>
+                    <option value="SL">SL (Soft Luggage)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Sub-Category
+                  </label>
+                  <select
+                    value={newProductForm.sub_category}
+                    onChange={(e) => setNewProductForm({ ...newProductForm, sub_category: e.target.value })}
+                    className="w-full text-xs px-3 py-2 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition"
+                  >
+                    <option value="PC UPRIGHT">PC UPRIGHT</option>
+                    <option value="PP UPRIGHT">PP UPRIGHT</option>
+                    <option value="SL UPRIGHT">SL UPRIGHT</option>
+                    <option value="U/J PC UPRIGHT">U/J PC UPRIGHT</option>
+                    <option value="BACKPACK">BACKPACK</option>
+                    <option value="RDFL">RDFL</option>
+                    <option value="SCHOOL BAG">SCHOOL BAG</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Row 4: Case Pack & Price */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Case Pack (PCS/Box) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={newProductForm.case_pack}
+                    onChange={(e) => setNewProductForm({ ...newProductForm, case_pack: e.target.value })}
+                    className="w-full text-xs font-mono px-3 py-2 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Rate Per Piece (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={newProductForm.selling_rate}
+                    onChange={(e) => setNewProductForm({ ...newProductForm, selling_rate: e.target.value })}
+                    placeholder="e.g. 2693.85"
+                    className="w-full text-xs font-mono px-3 py-2 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition"
+                  />
+                </div>
+              </div>
+
+              {/* Live Calculated Case Rate Banner */}
+              {newProductForm.selling_rate && (
+                <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-2xl text-xs flex items-center justify-between">
+                  <span className="text-indigo-900 font-semibold">Equivalent Case Rate:</span>
+                  <span className="font-mono font-bold text-indigo-700">
+                    ₹{(parseFloat(newProductForm.selling_rate || 0) * (parseInt(newProductForm.case_pack, 10) || 1)).toFixed(2)} / Case (Box)
+                  </span>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAddProductModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={addProductSaving}
+                  className="px-5 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition disabled:opacity-50"
+                >
+                  {addProductSaving ? "Creating SKU..." : "Create Product"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 };

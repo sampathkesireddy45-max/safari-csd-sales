@@ -12,6 +12,7 @@ from .employee import (
     get_employee_by_employee_id,
     get_employees,
     create_employee,
+    reactivate_employee,
     update_employee,
     delete_employee,
 )
@@ -61,6 +62,7 @@ __all__ = [
     "get_employee_by_employee_id",
     "get_employees",
     "create_employee",
+    "reactivate_employee",
     "update_employee",
     "delete_employee",
     "get_product",

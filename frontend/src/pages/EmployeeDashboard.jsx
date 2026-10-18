@@ -23,7 +23,8 @@ import {
   Radio,
   PackagePlus,
   Search,
-  Edit3
+  Edit3,
+  PackageCheck
 } from "lucide-react";
 
 const EmployeeDashboard = () => {
@@ -46,6 +47,7 @@ const EmployeeDashboard = () => {
   const [stockModalOpen, setStockModalOpen] = useState(false);
   const [stockProductToEdit, setStockProductToEdit] = useState(null);
   const [stockSearchTerm, setStockSearchTerm] = useState("");
+  const [stockFilter, setStockFilter] = useState("ALL"); // "ALL" | "LOW" | "OVERSTOCK"
 
   // Background Live GPS broadcast
   useEffect(() => {
@@ -116,8 +118,18 @@ const EmployeeDashboard = () => {
     fetchStats();
   };
 
-  // Filter current stock by Index No or product name
+  const lowStockItemsCount = (stats.currentStock || []).filter(
+    (item) => (item.quantity || 0) < 5
+  ).length;
+
+  const overStockItemsCount = (stats.currentStock || []).filter(
+    (item) => (item.quantity || 0) > 10
+  ).length;
+
+  // Filter current stock by Index No, product name, low stock, and overstock
   const filteredStock = (stats.currentStock || []).filter((item) => {
+    if (stockFilter === "LOW" && (item.quantity || 0) >= 5) return false;
+    if (stockFilter === "OVERSTOCK" && (item.quantity || 0) <= 10) return false;
     if (!stockSearchTerm.trim()) return true;
     const term = stockSearchTerm.toLowerCase().trim();
     const indexMatch = item.index_no && String(item.index_no).toLowerCase().includes(term);
@@ -255,8 +267,8 @@ const EmployeeDashboard = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 w-full sm:w-auto">
-                <div className="relative w-full sm:w-64">
+              <div className="flex items-center gap-2.5 w-full sm:w-auto flex-wrap">
+                <div className="relative w-full sm:w-56">
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
@@ -266,6 +278,34 @@ const EmployeeDashboard = () => {
                     className="w-full text-xs pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 transition"
                   />
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => setStockFilter(stockFilter === "LOW" ? "ALL" : "LOW")}
+                  className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border transition shadow-sm shrink-0 ${
+                    stockFilter === "LOW"
+                      ? "bg-red-600 text-white border-red-600 shadow-red-200"
+                      : "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                  }`}
+                  title="Filter to show only products with less than 5 pieces"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>Low Stock (&lt;5): {lowStockItemsCount}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setStockFilter(stockFilter === "OVERSTOCK" ? "ALL" : "OVERSTOCK")}
+                  className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border transition shadow-sm shrink-0 ${
+                    stockFilter === "OVERSTOCK"
+                      ? "bg-amber-600 text-white border-amber-600 shadow-amber-200"
+                      : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
+                  }`}
+                  title="Filter to show only products with greater than 10 pieces (Overstock)"
+                >
+                  <PackageCheck className="w-3.5 h-3.5" />
+                  <span>Overstock (&gt;10): {overStockItemsCount}</span>
+                </button>
 
                 <button
                   type="button"
@@ -280,66 +320,112 @@ const EmployeeDashboard = () => {
 
             {filteredStock && filteredStock.length > 0 ? (
               <div className="divide-y divide-slate-100 max-h-[32rem] overflow-y-auto">
-                {filteredStock.map((item) => (
-                  <div
-                    key={item.id}
-                    className="p-4 sm:px-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/80 transition"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        {item.index_no && (
-                          <span className="px-2 py-0.5 rounded-md font-mono font-bold text-[10px] bg-indigo-100 text-indigo-800">
-                            INDEX #{item.index_no}
-                          </span>
-                        )}
-                        <h4 className="text-sm font-semibold text-slate-900">
-                          {item.product_name}
-                        </h4>
+                {filteredStock.map((item) => {
+                  const isLowStock = (item.quantity ?? 0) < 5;
+                  const isOverStock = (item.quantity ?? 0) > 10;
+                  return (
+                    <div
+                      key={item.id}
+                      className={`p-4 sm:px-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition ${
+                        isLowStock
+                          ? "bg-red-50/50 hover:bg-red-50/80 border-l-4 border-l-red-500"
+                          : isOverStock
+                          ? "bg-amber-50/40 hover:bg-amber-50/70 border-l-4 border-l-amber-500"
+                          : "hover:bg-slate-50/80"
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {item.index_no && (
+                            <span className="px-2 py-0.5 rounded-md font-mono font-bold text-[10px] bg-indigo-100 text-indigo-800">
+                              INDEX #{item.index_no}
+                            </span>
+                          )}
+                          <h4 className="text-sm font-semibold text-slate-900">
+                            {item.product_name}
+                          </h4>
+                          {isLowStock && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-red-600 text-white shadow-xs uppercase">
+                              <AlertTriangle className="w-3 h-3" />
+                              Low Stock
+                            </span>
+                          )}
+                          {isOverStock && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-600 text-white shadow-xs uppercase">
+                              <PackageCheck className="w-3 h-3" />
+                              Overstock
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
+                          <span>SKU #{item.product_id}</span>
+                          {item.selling_rate && (
+                            <span className="font-semibold text-emerald-700">
+                              CSD Selling Rate: ₹{item.selling_rate.toLocaleString("en-IN")}
+                            </span>
+                          )}
+                          {item.rate_per_pc && (
+                            <span className="text-slate-400">
+                              (Base: ₹{item.rate_per_pc.toLocaleString("en-IN")})
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
-                        <span>SKU #{item.product_id}</span>
-                        {item.selling_rate && (
-                          <span className="font-semibold text-emerald-700">
-                            CSD Selling Rate: ₹{item.selling_rate.toLocaleString("en-IN")}
-                          </span>
-                        )}
-                        {item.rate_per_pc && (
-                          <span className="text-slate-400">
-                            (Base: ₹{item.rate_per_pc.toLocaleString("en-IN")})
-                          </span>
-                        )}
+
+                      <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2.5 self-end sm:self-center">
+                        <div className="text-right">
+                          {isLowStock ? (
+                            <div className="flex flex-col items-end gap-1">
+                              <span className="inline-flex items-center gap-1.5 text-xs font-bold font-mono px-3 py-1 rounded-xl border bg-red-100 text-red-700 border-red-300 shadow-xs">
+                                <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                                {item.quantity === 0 ? "0 PCS (OUT OF STOCK)" : `LOW STOCK: ${item.quantity} PCS`}
+                              </span>
+                              <span className="text-[10px] text-red-600 font-bold">
+                                {item.quantity === 0 ? "Needs Restocking" : `Only ${item.quantity} pcs left (<5)`}
+                              </span>
+                            </div>
+                          ) : isOverStock ? (
+                            <div className="flex flex-col items-end gap-1">
+                              <span className="inline-flex items-center gap-1.5 text-xs font-bold font-mono px-3 py-1 rounded-xl border bg-amber-100 text-amber-800 border-amber-300 shadow-xs">
+                                <PackageCheck className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                OVERSTOCK: {item.quantity} PCS
+                              </span>
+                              <span className="text-[10px] text-amber-700 font-medium">
+                                High Inventory (&gt;10 pcs)
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="inline-block text-sm font-bold font-mono px-3 py-1 rounded-xl border bg-emerald-50 text-emerald-800 border-emerald-200">
+                              {item.quantity} PCS
+                            </span>
+                          )}
+                          {item.case_pack > 1 && !isLowStock && (
+                            <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                              ≈ {Math.floor(item.quantity / item.case_pack)} Cases ({item.quantity % item.case_pack} pcs)
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleOpenStockModal({
+                              id: item.product_id,
+                              name: item.product_name,
+                              index_no: item.index_no,
+                              case_pack: item.case_pack,
+                            })
+                          }
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition shadow-xs"
+                          title="Enter / update stock in pieces or cases"
+                        >
+                          <PackagePlus className="w-3.5 h-3.5" />
+                          <span>Enter Stock</span>
+                        </button>
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-3 self-end sm:self-center">
-                      <span
-                        className={`text-base font-bold font-mono px-3 py-1 rounded-xl border ${
-                          item.quantity > 0
-                            ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                            : "bg-slate-100 text-slate-500 border-slate-200"
-                        }`}
-                      >
-                        {item.quantity} PCS
-                      </span>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleOpenStockModal({
-                            id: item.product_id,
-                            name: item.product_name,
-                            index_no: item.index_no,
-                          })
-                        }
-                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition"
-                        title="Enter / update piece count for this item"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        <span>Enter Pieces</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="p-12 text-center">

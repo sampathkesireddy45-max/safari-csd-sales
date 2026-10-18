@@ -58,29 +58,46 @@ def update_stock(
     if not location:
         raise HTTPException(status_code=404, detail="Store location not found")
 
+    case_pack = product.case_pack or 1
+    if req.unit == "cases":
+        effective_pieces = req.quantity * case_pack
+    else:
+        effective_pieces = req.quantity
+
     # Perform dynamic stock update
     inv = crud.inventory.set_or_update_stock(
         db=db,
         product_id=req.product_id,
         location_id=target_location_id,
-        quantity=req.quantity,
+        quantity=effective_pieces,
         mode=req.mode or "set"
     )
 
     action_label = "Adjusted" if req.mode == "set" else "Added incoming"
+    cases_count = inv.quantity // case_pack
+    remainder_pcs = inv.quantity % case_pack
+    case_text = f" ({cases_count} Cases + {remainder_pcs} Pcs)" if remainder_pcs else f" ({cases_count} Cases)"
     return {
         "status": "success",
-        "message": f"{action_label} stock for [{product.name}] to {inv.quantity} PCS at [{location.name}]",
+        "message": f"{action_label} stock for [{product.name}] to {inv.quantity} PCS{case_text} at [{location.name}]",
         "inventory": {
             "id": inv.id,
             "product_id": product.id,
             "product_name": product.name,
             "index_no": product.index_no,
+            "brand": product.brand,
+            "colour": product.colour,
+            "category": product.category,
+            "sub_category": product.sub_category,
+            "case_pack": case_pack,
             "selling_rate": product.selling_rate,
             "rate_per_pc": product.rate_per_pc,
+            "rate_per_case": (product.selling_rate * case_pack) if product.selling_rate else None,
             "location_id": location.id,
             "location_name": location.name,
             "quantity": inv.quantity,
+            "cases": cases_count,
+            "remainder_pieces": remainder_pcs,
             "last_updated": inv.last_updated.isoformat() if inv.last_updated else None
         }
     }
@@ -161,16 +178,26 @@ def read_inventories(
 
     results = []
     for inv, prod, loc in items.offset(skip).limit(limit).all():
+        case_pack = prod.case_pack or 1
+        selling_rate = prod.selling_rate
         results.append({
             "id": inv.id,
             "product_id": prod.id,
             "product_name": prod.name,
             "index_no": prod.index_no,
+            "brand": prod.brand,
+            "colour": prod.colour,
+            "category": prod.category,
+            "sub_category": prod.sub_category,
+            "case_pack": case_pack,
             "rate_per_pc": prod.rate_per_pc,
-            "selling_rate": prod.selling_rate,
+            "selling_rate": selling_rate,
+            "rate_per_case": (selling_rate * case_pack) if selling_rate else None,
             "location_id": loc.id,
             "location_name": loc.name,
             "quantity": inv.quantity,
+            "cases": inv.quantity // case_pack,
+            "remainder_pieces": inv.quantity % case_pack,
             "last_updated": inv.last_updated.isoformat() if inv.last_updated else None
         })
     return results

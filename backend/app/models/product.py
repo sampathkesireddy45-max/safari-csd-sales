@@ -11,6 +11,11 @@ class Product(Base):
     index_no = Column(String, index=True, nullable=True)
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
+    brand = Column(String, nullable=True)
+    colour = Column(String, nullable=True)
+    category = Column(String, nullable=True)
+    sub_category = Column(String, nullable=True)
+    case_pack = Column(Integer, default=1, nullable=False)
     rate_per_pc = Column(Float, nullable=True)
     selling_rate = Column(Float, nullable=True)
     is_active = Column(Boolean, default=True)
@@ -18,7 +23,11 @@ class Product(Base):
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     # Relationships
-    inventory_items = relationship("Inventory", back_populates="product")
+    inventory_items = relationship("Inventory", back_populates="product", cascade="all, delete-orphan")
     sale_items = relationship("SaleItem", back_populates="product")
     damage_items = relationship("DamageReportItem", back_populates="product")
+
+    @property
+    def total_stock(self) -> int:
+        return sum(item.quantity for item in self.inventory_items) if self.inventory_items else 0
 

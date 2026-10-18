@@ -59,7 +59,7 @@ const AdminCredentials = () => {
         getEmployees(),
         getLocations(),
       ]);
-      setEmployees(empsData);
+      setEmployees((empsData || []).filter((employee) => employee.status === "active"));
       setLocations(locsData);
     } catch (err) {
       console.error("Failed to load staff:", err);
@@ -159,26 +159,6 @@ Please log in using your User ID and the password above.`;
         ...newEmpData,
         assigned_location_id: newEmpData.assigned_location_id ? parseInt(newEmpData.assigned_location_id, 10) : null,
       };
-
-      const handleRemoveEmployee = async (emp) => {
-        if (emp.role === "admin") {
-          addToast("Admin accounts cannot be removed from the staff portal", "error");
-          return;
-        }
-        if (!window.confirm(`Remove ${emp.name} (${emp.employee_id}) from staff credentials? This action cannot be undone.`)) {
-          return;
-        }
-        setRemovingEmployeeId(emp.id);
-        try {
-          await deleteEmployee(emp.id);
-          setEmployees((current) => current.filter((employee) => employee.id !== emp.id));
-          addToast(`${emp.name} was removed successfully`, "success");
-        } catch (err) {
-          addToast(err.message || "Failed to remove employee", "error");
-        } finally {
-          setRemovingEmployeeId(null);
-        }
-      };
       await createEmployee(payload);
       addToast("Staff member & credentials created successfully!", "success");
       setShowAddModal(false);
@@ -186,6 +166,26 @@ Please log in using your User ID and the password above.`;
     } catch (err) {
       console.error("Failed to create employee:", err);
       addToast(err.message || "Failed to create staff account", "error");
+    }
+  };
+
+  const handleRemoveEmployee = async (emp) => {
+    if (emp.role === "admin") {
+      addToast("Admin accounts cannot be removed from the staff portal", "error");
+      return;
+    }
+    if (!window.confirm(`Remove ${emp.name} (${emp.employee_id}) from staff credentials? This action cannot be undone.`)) {
+      return;
+    }
+    setRemovingEmployeeId(emp.id);
+    try {
+      await deleteEmployee(emp.id);
+      setEmployees((current) => current.filter((employee) => employee.id !== emp.id));
+      addToast(`${emp.name} was removed successfully. Historical sales and reports were preserved.`, "success");
+    } catch (err) {
+      addToast(err.message || "Failed to remove employee", "error");
+    } finally {
+      setRemovingEmployeeId(null);
     }
   };
 

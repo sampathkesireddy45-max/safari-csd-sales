@@ -7,8 +7,11 @@ def get_employee(db: Session, employee_id: int):
 def get_employee_by_employee_id(db: Session, employee_id: str):
     return db.query(models.Employee).filter(models.Employee.employee_id == employee_id).first()
 
-def get_employees(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(models.Employee).offset(skip).limit(limit).all()
+def get_employees(db: Session, skip: int = 0, limit: int = 100, status: str = None):
+    query = db.query(models.Employee)
+    if status and status.strip():
+        query = query.filter(models.Employee.status == status.strip())
+    return query.offset(skip).limit(limit).all()
 
 def create_employee(db: Session, employee: schemas.EmployeeCreate):
     data = employee.dict()
@@ -21,6 +24,19 @@ def create_employee(db: Session, employee: schemas.EmployeeCreate):
     db.commit()
     db.refresh(db_employee)
     return db_employee
+
+def reactivate_employee(db: Session, employee: models.Employee, employee_data: schemas.EmployeeCreate):
+    password = employee_data.password
+    if not password or len(password.strip()) < 8:
+        raise ValueError("A password of at least 8 characters is required")
+    data = employee_data.dict(exclude={"password"})
+    for key, value in data.items():
+        setattr(employee, key, value)
+    employee.status = "active"
+    employee.set_password(password.strip())
+    db.commit()
+    db.refresh(employee)
+    return employee
 
 def update_employee(db: Session, employee_id: int, employee: schemas.EmployeeUpdate):
     db_employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
@@ -38,6 +54,8 @@ def update_employee(db: Session, employee_id: int, employee: schemas.EmployeeUpd
 def delete_employee(db: Session, employee_id: int):
     db_employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
     if db_employee:
-        db.delete(db_employee)
+        db_employee.status = "inactive"
+        db_employee.hashed_password = None
         db.commit()
+        db.refresh(db_employee)
     return db_employee

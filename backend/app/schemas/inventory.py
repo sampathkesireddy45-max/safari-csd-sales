@@ -28,3 +28,5 @@ class StockUpdateRequest(BaseModel):
     location_id: Optional[int] = None
     quantity: int = Field(..., ge=0)
     mode: str = Field("set", pattern="^(set|add)$")
+    unit: Optional[str] = Field("pieces", pattern="^(pieces|cases)$")
+
