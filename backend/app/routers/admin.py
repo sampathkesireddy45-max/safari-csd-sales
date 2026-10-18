@@ -202,18 +202,22 @@ def get_admin_sales_summary(
                 "formatted_datetime": format_ist_datetime(sale.sale_date),
                 "employee_id": sale.employee_id,
                 "employee_name": sale.employee.name if sale.employee else "Unknown",
+                "employee_code": sale.employee.employee_id if sale.employee else "",
+                "location_id": sale.location_id,
                 "location_name": sale.location.name if sale.location else "Unknown",
                 "total_pieces": int(sale.total_pieces or 0),
                 "total_cost": _sale_cost(sale),
                 "item_count": len(sale.items),
                 "items": [
                     {
+                        "id": it.id,
                         "product_id": it.product_id,
                         "index_no": it.product.index_no if it.product else "N/A",
                         "product_name": it.product.name if it.product else "Product",
                         "brand": it.product.brand if it.product else "",
                         "colour": it.product.colour if it.product else "",
                         "quantity": it.quantity,
+                        "case_pack": it.product.case_pack if it.product else 1,
                         "unit_price": it.product.selling_rate if (it.product and it.product.selling_rate is not None) else (it.product.rate_per_pc or 0.0) if it.product else 0.0,
                     }
                     for it in sale.items

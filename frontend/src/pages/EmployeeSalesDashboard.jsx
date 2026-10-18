@@ -27,7 +27,9 @@ import {
   Receipt,
   X,
   ArrowUpDown,
-  Tag
+  Tag,
+  Globe2,
+  Store
 } from "lucide-react";
 
 const EmployeeSalesDashboard = () => {
@@ -37,10 +39,22 @@ const EmployeeSalesDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({
     employee: {},
+    selected_location: { id: null, location_id: null, name: "Assigned Store", is_all_stores: false },
+    locations: [],
     summary: {
+      my_pieces_sold: 0,
+      my_revenue: 0,
+      sales_count: 0,
+      store_opening_stock: 0,
+      store_closing_stock: 0,
+      store_pieces_sold: 0,
+      store_revenue: 0,
+      overall_opening_stock: 0,
+      overall_closing_stock: 0,
+      overall_pieces_sold: 0,
+      overall_revenue: 0,
       total_pieces_sold: 0,
       total_revenue: 0,
-      sales_count: 0,
       total_opening_stock: 0,
       total_closing_stock: 0,
       low_stock_count: 0,
@@ -52,6 +66,9 @@ const EmployeeSalesDashboard = () => {
     items: [],
     sales: [],
   });
+
+  // Store filter: "" means assigned store, number string means specific store id, "all" means all stores combined
+  const [selectedLocationId, setSelectedLocationId] = useState("");
 
   // Date filters
   const [dateFilterMode, setDateFilterMode] = useState("all"); // "all" | "today" | "custom"
@@ -66,15 +83,27 @@ const EmployeeSalesDashboard = () => {
 
   // Edit Opening Stock Modal State
   const [editingItem, setEditingItem] = useState(null);
+  const [editStoreLocationId, setEditStoreLocationId] = useState(null);
   const [newOpeningStock, setNewOpeningStock] = useState("");
   const [savingStock, setSavingStock] = useState(false);
 
-  const loadDashboardData = async (params = {}) => {
+  const loadDashboardData = async (extraParams = {}) => {
     setLoading(true);
     try {
       if (refreshUser) {
         refreshUser();
       }
+      const params = {};
+      
+      const locId = "location_id" in extraParams ? extraParams.location_id : selectedLocationId;
+      if (locId) params.location_id = locId;
+
+      const dFrom = "date_from" in extraParams ? extraParams.date_from : dateFrom;
+      if (dFrom) params.date_from = dFrom;
+
+      const dTo = "date_to" in extraParams ? extraParams.date_to : dateTo;
+      if (dTo) params.date_to = dTo;
+
       const res = await getEmployeeSalesDashboard(params);
       setData(res);
     } catch (err) {
@@ -88,6 +117,11 @@ const EmployeeSalesDashboard = () => {
   useEffect(() => {
     loadDashboardData();
   }, []);
+
+  const handleLocationChange = (locId) => {
+    setSelectedLocationId(locId);
+    loadDashboardData({ location_id: locId });
+  };
 
   const handleApplyDateFilter = (mode, customFrom = dateFrom, customTo = dateTo) => {
     setDateFilterMode(mode);
@@ -104,6 +138,8 @@ const EmployeeSalesDashboard = () => {
     } else {
       setDateFrom("");
       setDateTo("");
+      params.date_from = "";
+      params.date_to = "";
     }
     loadDashboardData(params);
   };
@@ -123,7 +159,7 @@ const EmployeeSalesDashboard = () => {
 
       // Status filter
       if (stockStatusFilter === "ALL") return true;
-      if (stockStatusFilter === "SOLD") return item.pieces_sold > 0;
+      if (stockStatusFilter === "SOLD") return (item.my_pieces_sold > 0 || item.store_pieces_sold > 0);
       if (stockStatusFilter === "LOW") return item.status === "low_stock";
       if (stockStatusFilter === "OUT") return item.status === "out_of_stock";
       if (stockStatusFilter === "OVERFLOW") return item.status === "overflow";
@@ -135,11 +171,24 @@ const EmployeeSalesDashboard = () => {
   // Open Edit Opening Stock Modal
   const handleOpenEditOpeningModal = (item) => {
     setEditingItem(item);
-    setNewOpeningStock(String(item.opening_stock));
+    // Determine which store is being edited
+    let targetLocId = null;
+    if (selectedLocationId && selectedLocationId !== "all") {
+      targetLocId = parseInt(selectedLocationId, 10);
+    } else if (data.selected_location?.id) {
+      targetLocId = data.selected_location.id;
+    } else if (data.employee.assigned_location_id) {
+      targetLocId = data.employee.assigned_location_id;
+    } else if (data.locations.length > 0) {
+      targetLocId = data.locations[0].id;
+    }
+    setEditStoreLocationId(targetLocId);
+    setNewOpeningStock(String(item.store_opening_stock ?? item.opening_stock ?? 0));
   };
 
   const handleCloseEditOpeningModal = () => {
     setEditingItem(null);
+    setEditStoreLocationId(null);
     setNewOpeningStock("");
   };
 
@@ -153,9 +202,16 @@ const EmployeeSalesDashboard = () => {
       return;
     }
 
-    if (openingVal < editingItem.pieces_sold) {
+    if (!editStoreLocationId) {
+      addToast("Please select a store location for updating opening stock", "error");
+      return;
+    }
+
+    // Minimum check against store sold
+    const minRequired = editingItem.store_pieces_sold ?? editingItem.pieces_sold ?? 0;
+    if (openingVal < minRequired) {
       addToast(
-        `Opening stock cannot be less than ${editingItem.pieces_sold} PCS already sold in this period!`,
+        `Opening stock cannot be less than ${minRequired} PCS already sold in this store period!`,
         "error"
       );
       return;
@@ -166,6 +222,7 @@ const EmployeeSalesDashboard = () => {
       const payload = {
         product_id: editingItem.product_id,
         opening_stock: openingVal,
+        location_id: editStoreLocationId,
         ...(dateFrom ? { date_from: dateFrom } : {}),
         ...(dateTo ? { date_to: dateTo } : {}),
       };
@@ -175,10 +232,7 @@ const EmployeeSalesDashboard = () => {
       handleCloseEditOpeningModal();
 
       // Refresh current dashboard data
-      const currentParams = {};
-      if (dateFrom) currentParams.date_from = dateFrom;
-      if (dateTo) currentParams.date_to = dateTo;
-      await loadDashboardData(currentParams);
+      await loadDashboardData();
     } catch (err) {
       console.error("Failed to update opening stock:", err);
       addToast(err.message || "Failed to update opening stock", "error");
@@ -187,22 +241,19 @@ const EmployeeSalesDashboard = () => {
     }
   };
 
-  const { summary, employee } = data;
-  const storeName = employee.assigned_location_name || user?.assigned_location_name || "Unassigned Store";
+  const { summary, employee, selected_location, locations } = data;
+  const assignedStoreName = employee.assigned_location_name || user?.assigned_location_name || "Unassigned Store";
   const hasStore = !!(employee.assigned_location_id || user?.assigned_location_id);
+  const activeStoreName = selected_location?.name || assignedStoreName;
+  const isAllStores = selected_location?.is_all_stores;
 
   return (
     <Layout
       title="Staff Retail Sales & Stock Counter"
-      subtitle="Track your individual sales, analyze opening vs closing store stock, and manage opening stock"
+      subtitle="Accurate Individual Store & Overall Network Opening vs Closing Stock Telemetry"
       action={
         <button
-          onClick={() => {
-            const params = {};
-            if (dateFrom) params.date_from = dateFrom;
-            if (dateTo) params.date_to = dateTo;
-            loadDashboardData(params);
-          }}
+          onClick={() => loadDashboardData()}
           className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200/80 hover:bg-slate-50 rounded-xl shadow-sm transition"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
@@ -224,22 +275,26 @@ const EmployeeSalesDashboard = () => {
               <Building2 className="w-6 h-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className={`text-[11px] font-bold uppercase tracking-wider ${hasStore ? "text-indigo-300" : "text-amber-800"}`}>
-                  Assigned Store Counter
+                  Viewing Store Counter
                 </span>
-                {hasStore ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                    <CheckCircle2 className="w-3 h-3" /> Live Active
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                    <AlertTriangle className="w-3 h-3" /> Unassigned
+                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  isAllStores
+                    ? "bg-purple-500/30 text-purple-200 border border-purple-400/40"
+                    : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                }`}>
+                  {isAllStores ? <Globe2 className="w-3 h-3" /> : <Store className="w-3 h-3" />}
+                  {isAllStores ? "Network Wide" : "Individual Outlet"}
+                </span>
+                {employee.assigned_location_name && (
+                  <span className="text-[11px] text-indigo-200/80 bg-white/10 px-2 py-0.5 rounded-full">
+                    Assigned: {employee.assigned_location_name}
                   </span>
                 )}
               </div>
-              <h2 className={`text-xl font-extrabold tracking-tight ${hasStore ? "text-white" : "text-slate-900"}`}>
-                {storeName}
+              <h2 className={`text-xl font-extrabold tracking-tight mt-0.5 ${hasStore ? "text-white" : "text-slate-900"}`}>
+                {activeStoreName}
               </h2>
               <p className={`text-xs mt-0.5 ${hasStore ? "text-slate-300" : "text-slate-600"}`}>
                 Staff Member: <strong className="text-white font-medium">{employee.name || user?.name}</strong> ({employee.employee_id || user?.employee_id})
@@ -295,127 +350,242 @@ const EmployeeSalesDashboard = () => {
           </div>
         </div>
 
-        {/* Unassigned Warning Banner */}
-        {!hasStore && (
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-3 text-amber-900 text-sm">
-            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+        {/* STORE LOCATION SWITCHER BAR */}
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 font-bold">
+              <Building2 className="w-4 h-4" />
+            </div>
             <div>
-              <span className="font-bold">No Retail Location Assigned:</span> You are not currently assigned to a retail node. Opening & closing stock reflects your assigned store inventory. Please ask an administrator to assign your store location in the Admin Portal.
-            </div>
-          </div>
-        )}
-
-        {/* 7 KPI Metric Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
-          {/* 1. My Pieces Sold */}
-          <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
-            <div className="flex items-center justify-between text-slate-400 mb-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                My Sold
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+                Store Filter Switcher
               </span>
-              <ShoppingBag className="w-4 h-4 text-indigo-600" />
-            </div>
-            <div className="text-xl font-extrabold text-slate-900">
-              {summary.total_pieces_sold.toLocaleString()} <span className="text-xs font-semibold text-slate-400">PCS</span>
-            </div>
-            <div className="text-[11px] text-slate-500 mt-1">
-              {summary.sales_count} Transactions
+              <span className="text-xs font-bold text-slate-800">
+                Switch Store Counter to view individual vs overall network stock
+              </span>
             </div>
           </div>
 
-          {/* 2. My Revenue */}
-          <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
-            <div className="flex items-center justify-between text-slate-400 mb-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Revenue
+          <div className="flex flex-wrap items-center gap-1.5">
+            {/* Assigned Store Pill */}
+            <button
+              onClick={() => handleLocationChange("")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                selectedLocationId === ""
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
+            >
+              <Store className="w-3.5 h-3.5" />
+              <span>My Assigned Store ({assignedStoreName})</span>
+            </button>
+
+            {/* All Stores Combined Pill */}
+            <button
+              onClick={() => handleLocationChange("all")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                selectedLocationId === "all"
+                  ? "bg-purple-600 text-white shadow-sm"
+                  : "bg-slate-100 text-purple-700 hover:bg-purple-50"
+              }`}
+            >
+              <Globe2 className="w-3.5 h-3.5" />
+              <span>All Stores Combined</span>
+            </button>
+
+            {/* Dropdown for specific store selection */}
+            {locations && locations.length > 0 && (
+              <div className="relative">
+                <select
+                  value={selectedLocationId && selectedLocationId !== "all" ? selectedLocationId : ""}
+                  onChange={(e) => handleLocationChange(e.target.value)}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 bg-slate-50 text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="" disabled>Or Pick Specific Store...</option>
+                  {locations.map((loc) => (
+                    <option key={loc.id} value={String(loc.id)}>
+                      {loc.name} {loc.is_assigned ? "★ (Assigned)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ACCURATE OPENING & CLOSING STOCK KPI TILES */}
+        <div className="space-y-3">
+          {/* Section 1: Individual Store Stock Metrics */}
+          <div>
+            <div className="flex items-center justify-between mb-2 px-1">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                <Store className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Store Counter Stock & Sales: <strong>{activeStoreName}</strong></span>
               </span>
-              <TrendingUp className="w-4 h-4 text-emerald-600" />
+              <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
+                Individual Store Metrics
+              </span>
             </div>
-            <div className="text-xl font-extrabold text-emerald-700 font-mono">
-              ₹{summary.total_revenue.toLocaleString("en-IN")}
-            </div>
-            <div className="text-[11px] text-slate-500 mt-1">
-              Individual Total
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {/* Store Opening Stock */}
+              <div className="bg-gradient-to-br from-blue-50/80 to-white rounded-2xl p-4 border border-blue-200/80 shadow-sm relative overflow-hidden">
+                <div className="flex items-center justify-between text-blue-600 mb-1.5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-blue-800">
+                    Store Opening Stock
+                  </span>
+                  <Boxes className="w-4 h-4 text-blue-600" />
+                </div>
+                <div className="text-2xl font-black text-blue-950">
+                  {(summary.store_opening_stock ?? summary.total_opening_stock ?? 0).toLocaleString()} <span className="text-xs font-bold text-blue-500">PCS</span>
+                </div>
+                <div className="text-[11px] font-medium text-blue-700/80 mt-1 flex items-center justify-between">
+                  <span>Editable starting counter stock</span>
+                  <span className="font-mono text-[10px] bg-blue-100/70 px-1.5 py-0.2 rounded">Closing + Sold</span>
+                </div>
+              </div>
+
+              {/* Store Closing Stock */}
+              <div className="bg-gradient-to-br from-indigo-50/80 to-white rounded-2xl p-4 border border-indigo-200/80 shadow-sm relative overflow-hidden">
+                <div className="flex items-center justify-between text-indigo-600 mb-1.5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-800">
+                    Store Closing Stock
+                  </span>
+                  <Package className="w-4 h-4 text-indigo-600" />
+                </div>
+                <div className="text-2xl font-black text-indigo-950">
+                  {(summary.store_closing_stock ?? summary.total_closing_stock ?? 0).toLocaleString()} <span className="text-xs font-bold text-indigo-500">PCS</span>
+                </div>
+                <div className="text-[11px] font-medium text-indigo-700/80 mt-1 flex items-center justify-between">
+                  <span>Current live physical stock</span>
+                  <span className="font-mono text-[10px] bg-indigo-100/70 px-1.5 py-0.2 rounded">Live Warehouse</span>
+                </div>
+              </div>
+
+              {/* Store Volume Sold */}
+              <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
+                <div className="flex items-center justify-between text-slate-500 mb-1.5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-700">
+                    Store Volume Sold
+                  </span>
+                  <ShoppingBag className="w-4 h-4 text-emerald-600" />
+                </div>
+                <div className="text-2xl font-black text-emerald-700">
+                  {(summary.store_pieces_sold ?? 0).toLocaleString()} <span className="text-xs font-bold text-emerald-500">PCS</span>
+                </div>
+                <div className="text-[11px] font-medium text-slate-500 mt-1 flex items-center justify-between">
+                  <span>Store Sales Period</span>
+                  <span className="font-mono font-bold text-emerald-700">₹{(summary.store_revenue ?? 0).toLocaleString("en-IN")}</span>
+                </div>
+              </div>
+
+              {/* My Personal Sold Counter */}
+              <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
+                <div className="flex items-center justify-between text-slate-500 mb-1.5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-700">
+                    My Personal Counter Sales
+                  </span>
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                </div>
+                <div className="text-2xl font-black text-slate-900">
+                  {(summary.my_pieces_sold ?? summary.total_pieces_sold ?? 0).toLocaleString()} <span className="text-xs font-bold text-slate-400">PCS</span>
+                </div>
+                <div className="text-[11px] font-medium text-slate-500 mt-1 flex items-center justify-between">
+                  <span>{summary.sales_count ?? 0} Receipts</span>
+                  <span className="font-mono font-bold text-emerald-700">₹{(summary.my_revenue ?? summary.total_revenue ?? 0).toLocaleString("en-IN")}</span>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* 3. Opening Stock */}
-          <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
-            <div className="flex items-center justify-between text-slate-400 mb-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Opening Stock
+          {/* Section 2: Overall Network Stock Metrics (All Stores Combined) */}
+          <div className="pt-2">
+            <div className="flex items-center justify-between mb-2 px-1">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-purple-900 flex items-center gap-1.5">
+                <Globe2 className="w-3.5 h-3.5 text-purple-600" />
+                <span>Overall Network Stock & Sales: <strong>All CSD Canteen Outlets Combined</strong></span>
               </span>
-              <Boxes className="w-4 h-4 text-blue-600" />
+              <span className="text-[11px] font-semibold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-md">
+                Combined 8 Canteen Nodes
+              </span>
             </div>
-            <div className="text-xl font-extrabold text-blue-900">
-              {summary.total_opening_stock.toLocaleString()} <span className="text-xs font-semibold text-slate-400">PCS</span>
-            </div>
-            <div className="text-[11px] text-slate-500 mt-1">
-              Editable Stock
-            </div>
-          </div>
 
-          {/* 4. Closing Stock */}
-          <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
-            <div className="flex items-center justify-between text-slate-400 mb-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Closing Stock
-              </span>
-              <Package className="w-4 h-4 text-indigo-600" />
-            </div>
-            <div className="text-xl font-extrabold text-indigo-900">
-              {summary.total_closing_stock.toLocaleString()} <span className="text-xs font-semibold text-slate-400">PCS</span>
-            </div>
-            <div className="text-[11px] text-slate-500 mt-1">
-              Current Live Store Stock
-            </div>
-          </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {/* Overall Opening Stock */}
+              <div className="bg-gradient-to-br from-sky-50/80 to-white rounded-2xl p-4 border border-sky-200/80 shadow-sm">
+                <div className="flex items-center justify-between text-sky-700 mb-1.5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-sky-800">
+                    Overall Opening Stock
+                  </span>
+                  <Boxes className="w-4 h-4 text-sky-600" />
+                </div>
+                <div className="text-2xl font-black text-sky-950">
+                  {(summary.overall_opening_stock ?? 0).toLocaleString()} <span className="text-xs font-bold text-sky-500">PCS</span>
+                </div>
+                <div className="text-[11px] font-medium text-sky-700/80 mt-1">
+                  Total starting stock across all 8 stores
+                </div>
+              </div>
 
-          {/* 5. Low Stock */}
-          <div className="bg-amber-50/60 rounded-2xl p-4 border border-amber-200/80 shadow-sm">
-            <div className="flex items-center justify-between text-amber-600 mb-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
-                Low Stock
-              </span>
-              <AlertTriangle className="w-4 h-4 text-amber-600" />
-            </div>
-            <div className="text-xl font-extrabold text-amber-900">
-              {summary.low_stock_count} <span className="text-xs font-semibold text-amber-700">Items</span>
-            </div>
-            <div className="text-[11px] text-amber-700 mt-1">
-              1 – 4 PCS remaining
-            </div>
-          </div>
+              {/* Overall Closing Stock */}
+              <div className="bg-gradient-to-br from-purple-50/80 to-white rounded-2xl p-4 border border-purple-200/80 shadow-sm">
+                <div className="flex items-center justify-between text-purple-700 mb-1.5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-purple-800">
+                    Overall Closing Stock
+                  </span>
+                  <Layers className="w-4 h-4 text-purple-600" />
+                </div>
+                <div className="text-2xl font-black text-purple-950">
+                  {(summary.overall_closing_stock ?? 0).toLocaleString()} <span className="text-xs font-bold text-purple-500">PCS</span>
+                </div>
+                <div className="text-[11px] font-medium text-purple-700/80 mt-1">
+                  Total physical inventory across all 8 stores
+                </div>
+              </div>
 
-          {/* 6. Out of Stock */}
-          <div className="bg-rose-50/60 rounded-2xl p-4 border border-rose-200/80 shadow-sm">
-            <div className="flex items-center justify-between text-rose-600 mb-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-rose-800">
-                Out of Stock
-              </span>
-              <AlertOctagon className="w-4 h-4 text-rose-600" />
-            </div>
-            <div className="text-xl font-extrabold text-rose-900">
-              {summary.out_of_stock_count} <span className="text-xs font-semibold text-rose-700">Items</span>
-            </div>
-            <div className="text-[11px] text-rose-700 mt-1">
-              0 PCS available
-            </div>
-          </div>
+              {/* Overall Network Sold */}
+              <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
+                <div className="flex items-center justify-between text-slate-500 mb-1.5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-700">
+                    Overall Network Sold
+                  </span>
+                  <TrendingUp className="w-4 h-4 text-indigo-600" />
+                </div>
+                <div className="text-2xl font-black text-indigo-900">
+                  {(summary.overall_pieces_sold ?? 0).toLocaleString()} <span className="text-xs font-bold text-indigo-400">PCS</span>
+                </div>
+                <div className="text-[11px] font-medium text-slate-500 mt-1 flex items-center justify-between">
+                  <span>Network Volume</span>
+                  <span className="font-mono font-bold text-emerald-700">₹{(summary.overall_revenue ?? 0).toLocaleString("en-IN")}</span>
+                </div>
+              </div>
 
-          {/* 7. Overflow */}
-          <div className="bg-purple-50/60 rounded-2xl p-4 border border-purple-200/80 shadow-sm">
-            <div className="flex items-center justify-between text-purple-600 mb-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-purple-800">
-                Overflow
-              </span>
-              <Layers className="w-4 h-4 text-purple-600" />
-            </div>
-            <div className="text-xl font-extrabold text-purple-900">
-              {summary.overflow_stock_count} <span className="text-xs font-semibold text-purple-700">Items</span>
-            </div>
-            <div className="text-[11px] text-purple-700 mt-1">
-              &gt; 10 PCS excess
+              {/* Stock Health Balance Summary */}
+              <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+                <div className="flex items-center justify-between text-slate-500 mb-1">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-700">
+                    Store Stock Health
+                  </span>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                </div>
+                <div className="grid grid-cols-3 gap-1 text-center py-0.5">
+                  <div className="bg-rose-50 rounded-lg p-1 border border-rose-100">
+                    <span className="block text-xs font-black text-rose-700">{summary.out_of_stock_count ?? 0}</span>
+                    <span className="block text-[9px] font-bold text-rose-500">Out (0)</span>
+                  </div>
+                  <div className="bg-amber-50 rounded-lg p-1 border border-amber-100">
+                    <span className="block text-xs font-black text-amber-700">{summary.low_stock_count ?? 0}</span>
+                    <span className="block text-[9px] font-bold text-amber-500">Low (&lt;5)</span>
+                  </div>
+                  <div className="bg-emerald-50 rounded-lg p-1 border border-emerald-100">
+                    <span className="block text-xs font-black text-emerald-700">{summary.healthy_stock_count ?? 0}</span>
+                    <span className="block text-[9px] font-bold text-emerald-500">Optimal</span>
+                  </div>
+                </div>
+                <div className="text-[10px] text-slate-400 text-center mt-1">
+                  {data.items.length} Total SKUs in Catalog
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -432,7 +602,7 @@ const EmployeeSalesDashboard = () => {
               }`}
             >
               <Boxes className="w-4 h-4" />
-              <span>Catalog Stock & Opening Stock ({filteredItems.length})</span>
+              <span>Stock Catalog & Opening Stock ({filteredItems.length})</span>
             </button>
             <button
               onClick={() => setActiveTab("sales")}
@@ -450,7 +620,7 @@ const EmployeeSalesDashboard = () => {
           {/* Quick Info */}
           <div className="text-xs text-slate-500 flex items-center gap-2">
             <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span>Opening stock is editable directly in the stock table below</span>
+            <span>Opening stock is editable per store counter directly in the table below</span>
           </div>
         </div>
 
@@ -475,11 +645,11 @@ const EmployeeSalesDashboard = () => {
               <div className="flex flex-wrap items-center gap-1.5">
                 {[
                   { id: "ALL", label: "All Items" },
-                  { id: "SOLD", label: "My Sold Items" },
-                  { id: "LOW", label: `Low Stock (${summary.low_stock_count})` },
-                  { id: "OUT", label: `Out of Stock (${summary.out_of_stock_count})` },
-                  { id: "OVERFLOW", label: `Overflow (${summary.overflow_stock_count})` },
-                  { id: "HEALTHY", label: `Healthy (${summary.healthy_stock_count})` },
+                  { id: "SOLD", label: "Sold Items" },
+                  { id: "LOW", label: `Low Stock (${summary.low_stock_count ?? 0})` },
+                  { id: "OUT", label: `Out of Stock (${summary.out_of_stock_count ?? 0})` },
+                  { id: "OVERFLOW", label: `Overflow (${summary.overflow_stock_count ?? 0})` },
+                  { id: "HEALTHY", label: `Healthy (${summary.healthy_stock_count ?? 0})` },
                 ].map((f) => (
                   <button
                     key={f.id}
@@ -519,7 +689,7 @@ const EmployeeSalesDashboard = () => {
             {/* Table */}
             <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
               {loading ? (
-                <TableSkeleton rows={8} cols={7} />
+                <TableSkeleton rows={8} cols={9} />
               ) : filteredItems.length === 0 ? (
                 <div className="p-12 text-center text-slate-500">
                   <Boxes className="w-12 h-12 mx-auto text-slate-300 mb-3" />
@@ -531,28 +701,47 @@ const EmployeeSalesDashboard = () => {
                   <table className="w-full text-left text-sm text-slate-700">
                     <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
                       <tr>
-                        <th className="px-5 py-3.5 font-semibold">Index No.</th>
-                        <th className="px-5 py-3.5 font-semibold">Product Name & Specifications</th>
-                        <th className="px-5 py-3.5 font-semibold text-right">Selling Rate</th>
-                        <th className="px-5 py-3.5 font-semibold text-center">My Pieces Sold</th>
-                        <th className="px-5 py-3.5 font-semibold text-center bg-indigo-50/60 text-indigo-900">
-                          Opening Stock
-                          <span className="block text-[9px] font-normal text-indigo-700 lowercase">(editable)</span>
+                        <th className="px-4 py-3.5 font-semibold">Index No.</th>
+                        <th className="px-4 py-3.5 font-semibold">Luggage Model & Specifications</th>
+                        <th className="px-4 py-3.5 font-semibold text-right">Rate</th>
+                        <th className="px-4 py-3.5 font-semibold text-center">My Sold</th>
+                        
+                        {/* Individual Store Columns */}
+                        <th className="px-4 py-3.5 font-bold text-center bg-blue-50/70 text-blue-900 border-l border-blue-100">
+                          Store Opening
+                          <span className="block text-[9px] font-normal text-blue-700 lowercase">(editable)</span>
                         </th>
-                        <th className="px-5 py-3.5 font-semibold text-center bg-slate-50">
-                          Closing Stock
-                          <span className="block text-[9px] font-normal text-slate-500 lowercase">(live store stock)</span>
+                        <th className="px-4 py-3.5 font-bold text-center bg-indigo-50/70 text-indigo-900 border-r border-indigo-100">
+                          Store Closing
+                          <span className="block text-[9px] font-normal text-indigo-700 lowercase">(live store stock)</span>
                         </th>
-                        <th className="px-5 py-3.5 font-semibold text-center">Stock Status</th>
-                        <th className="px-5 py-3.5 font-semibold text-right">Action</th>
+
+                        {/* Overall Network Columns */}
+                        <th className="px-4 py-3.5 font-bold text-center bg-sky-50/70 text-sky-900">
+                          Overall Opening
+                          <span className="block text-[9px] font-normal text-sky-700 lowercase">(all 8 stores)</span>
+                        </th>
+                        <th className="px-4 py-3.5 font-bold text-center bg-purple-50/70 text-purple-900 border-r border-purple-100">
+                          Overall Closing
+                          <span className="block text-[9px] font-normal text-purple-700 lowercase">(all 8 stores)</span>
+                        </th>
+
+                        <th className="px-4 py-3.5 font-semibold text-center">Status</th>
+                        <th className="px-4 py-3.5 font-semibold text-right">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {filteredItems.map((item) => {
-                        const isOut = item.closing_stock === 0;
-                        const isLow = item.closing_stock > 0 && item.closing_stock < 5;
-                        const isOverflow = item.closing_stock > 10;
-                        const isHealthy = item.closing_stock >= 5 && item.closing_stock <= 10;
+                        const storeClosing = item.store_closing_stock ?? item.closing_stock ?? 0;
+                        const storeOpening = item.store_opening_stock ?? item.opening_stock ?? 0;
+                        const overallClosing = item.overall_closing_stock ?? 0;
+                        const overallOpening = item.overall_opening_stock ?? 0;
+                        const mySold = item.my_pieces_sold ?? item.pieces_sold ?? 0;
+
+                        const isOut = storeClosing === 0;
+                        const isLow = storeClosing > 0 && storeClosing < 5;
+                        const isOverflow = storeClosing > 10;
+                        const isHealthy = storeClosing >= 5 && storeClosing <= 10;
 
                         return (
                           <tr
@@ -562,36 +751,36 @@ const EmployeeSalesDashboard = () => {
                             }`}
                           >
                             {/* Index No */}
-                            <td className="px-5 py-3.5 font-mono text-xs font-extrabold text-indigo-700">
-                              {item.index_no}
+                            <td className="px-4 py-3 font-mono text-xs font-extrabold text-indigo-700">
+                              #{item.index_no}
                             </td>
 
                             {/* Product Info */}
-                            <td className="px-5 py-3.5">
-                              <div className="font-bold text-slate-900">{item.name}</div>
-                              <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
-                                <span className="bg-slate-100 px-1.5 py-0.5 rounded font-medium">{item.brand}</span>
-                                {item.colour && <span>Color: {item.colour}</span>}
-                                <span>Pack: {item.case_pack} pcs/case</span>
+                            <td className="px-4 py-3">
+                              <div className="font-bold text-slate-900 text-xs leading-snug">{item.name}</div>
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-0.5">
+                                <span className="bg-slate-100 px-1 py-0.2 rounded font-medium">{item.brand}</span>
+                                {item.colour && <span>• {item.colour}</span>}
+                                <span>• Pack: {item.case_pack} pcs</span>
                               </div>
                             </td>
 
                             {/* Price */}
-                            <td className="px-5 py-3.5 text-right font-mono font-semibold text-slate-800">
+                            <td className="px-4 py-3 text-right font-mono font-semibold text-xs text-slate-800">
                               ₹{item.selling_rate.toLocaleString("en-IN")}
                             </td>
 
                             {/* My Pieces Sold */}
-                            <td className="px-5 py-3.5 text-center">
-                              {item.pieces_sold > 0 ? (
+                            <td className="px-4 py-3 text-center">
+                              {mySold > 0 ? (
                                 <div className="inline-flex flex-col items-center">
-                                  <span className="font-extrabold text-emerald-700 text-sm">
+                                  <span className="font-extrabold text-emerald-700 text-xs">
                                     {viewUnit === "pieces"
-                                      ? `${item.pieces_sold} PCS`
-                                      : `${item.cases_sold} Cases`}
+                                      ? `${mySold} PCS`
+                                      : `${(mySold / item.case_pack).toFixed(2)} Cs`}
                                   </span>
-                                  <span className="text-[10px] text-slate-400">
-                                    ₹{item.revenue.toLocaleString("en-IN")}
+                                  <span className="text-[9px] text-slate-400 font-mono">
+                                    ₹{(item.my_revenue ?? item.revenue ?? 0).toLocaleString("en-IN")}
                                   </span>
                                 </div>
                               ) : (
@@ -599,78 +788,101 @@ const EmployeeSalesDashboard = () => {
                               )}
                             </td>
 
-                            {/* Opening Stock (Editable!) */}
-                            <td className="px-5 py-3.5 text-center bg-indigo-50/30">
-                              <div className="inline-flex items-center gap-2 font-bold text-slate-800 text-sm">
+                            {/* Store Opening Stock (Editable!) */}
+                            <td className="px-4 py-3 text-center bg-blue-50/30 border-l border-blue-50 font-bold text-slate-800 text-xs">
+                              <div className="inline-flex items-center gap-1.5 justify-center">
                                 <span>
                                   {viewUnit === "pieces"
-                                    ? `${item.opening_stock} PCS`
-                                    : `${(item.opening_stock / item.case_pack).toFixed(2)} Cases`}
+                                    ? `${storeOpening} PCS`
+                                    : `${(storeOpening / item.case_pack).toFixed(2)} Cs`}
                                 </span>
                                 <button
                                   type="button"
                                   onClick={() => handleOpenEditOpeningModal(item)}
-                                  className="p-1 rounded-lg text-indigo-600 hover:text-indigo-800 hover:bg-indigo-100 transition"
-                                  title="Edit Opening Stock"
+                                  className="p-1 rounded-lg text-blue-600 hover:text-blue-800 hover:bg-blue-100 transition"
+                                  title="Edit Store Opening Stock"
                                 >
-                                  <Edit3 className="w-3.5 h-3.5" />
+                                  <Edit3 className="w-3 h-3" />
                                 </button>
                               </div>
                             </td>
 
-                            {/* Closing Stock */}
-                            <td className="px-5 py-3.5 text-center font-bold">
+                            {/* Store Closing Stock */}
+                            <td className="px-4 py-3 text-center bg-indigo-50/20 border-r border-indigo-50 font-bold">
                               <div className="inline-flex flex-col items-center">
-                                <span className={`text-sm ${
+                                <span className={`text-xs font-extrabold ${
                                   isOut ? "text-rose-600" : isLow ? "text-amber-600" : "text-slate-900"
                                 }`}>
                                   {viewUnit === "pieces"
-                                    ? `${item.closing_stock} PCS`
-                                    : `${(item.closing_stock / item.case_pack).toFixed(2)} Cases`}
+                                    ? `${storeClosing} PCS`
+                                    : `${(storeClosing / item.case_pack).toFixed(2)} Cs`}
                                 </span>
-                                <span className="text-[10px] text-slate-400">
-                                  {item.closing_cases} cs + {item.closing_remainder} pcs
+                                <span className="text-[9px] text-slate-400">
+                                  {item.store_closing_cases ?? Math.floor(storeClosing / item.case_pack)} cs + {item.store_closing_remainder ?? (storeClosing % item.case_pack)} pcs
+                                </span>
+                              </div>
+                            </td>
+
+                            {/* Overall Opening Stock */}
+                            <td className="px-4 py-3 text-center bg-sky-50/20 font-bold text-xs text-sky-950">
+                              <span>
+                                {viewUnit === "pieces"
+                                  ? `${overallOpening} PCS`
+                                  : `${(overallOpening / item.case_pack).toFixed(2)} Cs`}
+                              </span>
+                            </td>
+
+                            {/* Overall Closing Stock */}
+                            <td className="px-4 py-3 text-center bg-purple-50/20 border-r border-purple-50 font-bold">
+                              <div className="inline-flex flex-col items-center">
+                                <span className="text-xs font-extrabold text-purple-950">
+                                  {viewUnit === "pieces"
+                                    ? `${overallClosing} PCS`
+                                    : `${(overallClosing / item.case_pack).toFixed(2)} Cs`}
+                                </span>
+                                <span className="text-[9px] text-slate-400">
+                                  {item.overall_closing_cases ?? Math.floor(overallClosing / item.case_pack)} cs + {item.overall_closing_remainder ?? (overallClosing % item.case_pack)} pcs
                                 </span>
                               </div>
                             </td>
 
                             {/* Stock Status Badge */}
-                            <td className="px-5 py-3.5 text-center">
+                            <td className="px-4 py-3 text-center">
                               {isOut && (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">
-                                  <AlertOctagon className="w-3.5 h-3.5" />
-                                  <span>Out of Stock</span>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                                  <AlertOctagon className="w-3 h-3" />
+                                  <span>Out (0)</span>
                                 </span>
                               )}
                               {isLow && (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                                  <AlertTriangle className="w-3.5 h-3.5" />
-                                  <span>Low Stock (&lt;5)</span>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  <span>Low (&lt;5)</span>
                                 </span>
                               )}
                               {isOverflow && (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200">
-                                  <Layers className="w-3.5 h-3.5" />
-                                  <span>Overflow (&gt;10)</span>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                                  <Layers className="w-3 h-3" />
+                                  <span>&gt;10</span>
                                 </span>
                               )}
                               {isHealthy && (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>Healthy</span>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>Optimal</span>
                                 </span>
                               )}
                             </td>
 
                             {/* Action */}
-                            <td className="px-5 py-3.5 text-right">
+                            <td className="px-4 py-3 text-right">
                               <button
                                 type="button"
                                 onClick={() => handleOpenEditOpeningModal(item)}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition border border-indigo-200"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition border border-indigo-200"
                               >
-                                <Edit3 className="w-3.5 h-3.5" />
-                                <span>Edit Opening</span>
+                                <Edit3 className="w-3 h-3" />
+                                <span>Edit</span>
                               </button>
                             </td>
                           </tr>
@@ -792,7 +1004,7 @@ const EmployeeSalesDashboard = () => {
                 </div>
                 <div>
                   <h3 className="text-base font-bold">Edit Opening Stock</h3>
-                  <p className="text-xs text-indigo-200">Adjust stock baseline for this item</p>
+                  <p className="text-xs text-indigo-200">Adjust stock baseline for this item at selected store</p>
                 </div>
               </div>
               <button
@@ -818,27 +1030,49 @@ const EmployeeSalesDashboard = () => {
                 </div>
                 <div className="font-bold text-slate-900 text-sm">{editingItem.name}</div>
                 <div className="text-xs text-slate-500 flex items-center justify-between pt-1 border-t border-slate-200">
-                  <span>Store: <strong className="text-slate-800">{storeName}</strong></span>
                   <span>Rate: <strong className="text-emerald-700 font-mono">₹{editingItem.selling_rate}</strong></span>
+                  <span>Pack: <strong>{editingItem.case_pack} pcs/cs</strong></span>
                 </div>
+              </div>
+
+              {/* Target Store Location Picker */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                  Target Store Counter Location <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={editStoreLocationId || ""}
+                  onChange={(e) => setEditStoreLocationId(parseInt(e.target.value, 10))}
+                  className="w-full text-sm font-semibold px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 bg-white"
+                  required
+                >
+                  {locations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name} {loc.is_assigned ? "★ (Assigned)" : ""}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Opening stock is configured specifically per individual store counter.
+                </p>
               </div>
 
               {/* Current Metrics Grid */}
               <div className="grid grid-cols-2 gap-3 text-center">
                 <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100">
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-                    Already Sold
+                    Store Sold
                   </span>
                   <span className="text-lg font-extrabold text-emerald-800">
-                    {editingItem.pieces_sold} PCS
+                    {editingItem.store_pieces_sold ?? editingItem.pieces_sold ?? 0} PCS
                   </span>
                 </div>
                 <div className="p-3 bg-slate-100 rounded-xl border border-slate-200">
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-600">
-                    Current Closing Stock
+                    Store Current Closing
                   </span>
                   <span className="text-lg font-extrabold text-slate-800">
-                    {editingItem.closing_stock} PCS
+                    {editingItem.store_closing_stock ?? editingItem.closing_stock ?? 0} PCS
                   </span>
                 </div>
               </div>
@@ -850,7 +1084,7 @@ const EmployeeSalesDashboard = () => {
                 </label>
                 <input
                   type="number"
-                  min={editingItem.pieces_sold}
+                  min={editingItem.store_pieces_sold ?? editingItem.pieces_sold ?? 0}
                   value={newOpeningStock}
                   onChange={(e) => setNewOpeningStock(e.target.value)}
                   className="w-full text-lg font-bold px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900"
@@ -858,22 +1092,23 @@ const EmployeeSalesDashboard = () => {
                   autoFocus
                 />
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Must be at least <strong>{editingItem.pieces_sold} PCS</strong> (volume already sold in this period).
+                  Must be at least <strong>{editingItem.store_pieces_sold ?? editingItem.pieces_sold ?? 0} PCS</strong> (volume already sold at this store in this period).
                 </p>
               </div>
 
               {/* Resulting Closing Stock Preview */}
               {(() => {
                 const entered = parseInt(newOpeningStock, 10);
+                const soldAtStore = editingItem.store_pieces_sold ?? editingItem.pieces_sold ?? 0;
                 if (!isNaN(entered)) {
-                  const resultingClosing = entered - editingItem.pieces_sold;
+                  const resultingClosing = entered - soldAtStore;
                   return (
                     <div className={`p-3 rounded-xl border text-xs flex items-center justify-between ${
                       resultingClosing >= 0
                         ? "bg-indigo-50/70 border-indigo-200 text-indigo-950"
                         : "bg-rose-50 border-rose-200 text-rose-900"
                     }`}>
-                      <span className="font-semibold">Calculated New Closing Stock:</span>
+                      <span className="font-semibold">Calculated New Store Closing Stock:</span>
                       <span className="font-extrabold font-mono text-sm">
                         {resultingClosing >= 0 ? `${resultingClosing} PCS` : "Invalid (< 0)"}
                       </span>
@@ -904,7 +1139,7 @@ const EmployeeSalesDashboard = () => {
                       <span>Saving...</span>
                     </>
                   ) : (
-                    <span>Save Opening Stock</span>
+                    <span>Save Store Opening Stock</span>
                   )}
                 </button>
               </div>

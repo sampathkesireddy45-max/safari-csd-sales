@@ -16,12 +16,29 @@ import {
   ArrowUpDown,
   TrendingUp,
   Sparkles,
+  Edit3,
+  Trash2,
+  Plus,
+  Receipt,
+  X,
+  AlertTriangle,
+  Building2,
+  Calendar,
+  CheckCircle2,
+  Clock,
+  Store,
+  PackagePlus,
 } from "lucide-react";
+import StockEntryModal from "../components/StockEntryModal";
 import {
   exportAdminSalesXlsx,
   exportAdminSalesIndexWiseCsv,
   getAdminSalesSummary,
   getEmployees,
+  getProducts,
+  getLocations,
+  updateSale,
+  deleteSale,
 } from "../services/api";
 import { useToast } from "../components/Toast";
 
@@ -40,11 +57,16 @@ const AdminSales = () => {
     },
   });
   const [employees, setEmployees] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [locations, setLocations] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState("");
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+
+  // Main View Tab: "index_wise" (Catalog Performance) | "transactions" (Employee Sales Counter Records & Corrections)
+  const [activeViewTab, setActiveViewTab] = useState("index_wise");
 
   // Controls for Index-wise Section
   const [indexSearch, setIndexSearch] = useState("");
@@ -53,6 +75,25 @@ const AdminSales = () => {
   const [viewUnit, setViewUnit] = useState("pieces"); // 'pieces' or 'cases'
   const [sortBy, setSortBy] = useState("pieces_sold"); // 'pieces_sold', 'revenue', 'index_no', 'price'
   const [sortOrder, setSortOrder] = useState("desc");
+
+  // Controls for Transactions Section
+  const [transactionSearch, setTransactionSearch] = useState("");
+
+  // Edit / Correct Sale Modal State
+  const [editingSale, setEditingSale] = useState(null);
+  const [editEmployeeId, setEditEmployeeId] = useState("");
+  const [editLocationId, setEditLocationId] = useState("");
+  const [editItems, setEditItems] = useState([]);
+  const [editReason, setEditReason] = useState("");
+  const [savingCorrection, setSavingCorrection] = useState(false);
+
+  // Void / Delete Sale Confirmation Modal State
+  const [deletingSale, setDeletingSale] = useState(null);
+  const [deletingLoading, setDeletingLoading] = useState(false);
+
+  // Add Stock Modal State
+  const [stockModalOpen, setStockModalOpen] = useState(false);
+  const [selectedStockProduct, setSelectedStockProduct] = useState(null);
 
   const loadSales = async (employeeId = selectedEmployee) => {
     setLoading(true);
@@ -72,9 +113,16 @@ const AdminSales = () => {
   };
 
   useEffect(() => {
-    Promise.all([getEmployees(), getAdminSalesSummary({ limit: 1000 })])
-      .then(([employeeRows, salesData]) => {
+    Promise.all([
+      getEmployees(),
+      getProducts(),
+      getLocations(),
+      getAdminSalesSummary({ limit: 1000 })
+    ])
+      .then(([employeeRows, productRows, locationRows, salesData]) => {
         setEmployees(employeeRows || []);
+        setProducts(productRows || []);
+        setLocations(locationRows || []);
         setSummary(salesData);
       })
       .catch((error) => addToast(error.message || "Unable to load sales dashboard", "error"))
@@ -192,10 +240,159 @@ const AdminSales = () => {
     );
   }, [filteredIndexSales]);
 
+  // Filtered transactions for the Sales Records & Corrections Tab
+  const filteredTransactions = useMemo(() => {
+    let list = summary.sales || [];
+    if (selectedEmployee) {
+      list = list.filter((s) => String(s.employee_id) === String(selectedEmployee));
+    }
+    if (transactionSearch.trim()) {
+      const term = transactionSearch.trim().toLowerCase();
+      list = list.filter(
+        (s) =>
+          String(s.id).includes(term) ||
+          s.employee_name?.toLowerCase().includes(term) ||
+          s.employee_code?.toLowerCase().includes(term) ||
+          s.location_name?.toLowerCase().includes(term) ||
+          s.items?.some((it) =>
+            it.index_no?.toLowerCase().includes(term) ||
+            it.product_name?.toLowerCase().includes(term)
+          )
+      );
+    }
+    return list;
+  }, [summary.sales, selectedEmployee, transactionSearch]);
+
+  // Open Edit / Correct Sale Modal
+  const handleOpenEditSaleModal = (sale) => {
+    setEditingSale(sale);
+    setEditEmployeeId(sale.employee_id || "");
+    setEditLocationId(sale.location_id || "");
+    setEditReason("");
+    // Clone items
+    const itemsCopy = (sale.items || []).map((it) => {
+      const prod = products.find((p) => p.id === it.product_id);
+      return {
+        product_id: it.product_id,
+        quantity: it.quantity,
+        unit_price: it.unit_price ?? (prod?.selling_rate || prod?.rate_per_pc || 0),
+      };
+    });
+    setEditItems(itemsCopy.length > 0 ? itemsCopy : [{ product_id: products[0]?.id || 1, quantity: 1, unit_price: products[0]?.selling_rate || 0 }]);
+  };
+
+  const handleCloseEditSaleModal = () => {
+    setEditingSale(null);
+    setEditItems([]);
+    setEditReason("");
+  };
+
+  // Modify item in modal
+  const handleItemProductChange = (index, newProductId) => {
+    const prodId = parseInt(newProductId, 10);
+    const prod = products.find((p) => p.id === prodId);
+    const updated = [...editItems];
+    updated[index] = {
+      ...updated[index],
+      product_id: prodId,
+      unit_price: prod?.selling_rate ?? prod?.rate_per_pc ?? 0,
+    };
+    setEditItems(updated);
+  };
+
+  const handleItemQuantityChange = (index, newQuantity) => {
+    const val = parseInt(newQuantity, 10);
+    const updated = [...editItems];
+    updated[index] = {
+      ...updated[index],
+      quantity: isNaN(val) ? 0 : Math.max(1, val),
+    };
+    setEditItems(updated);
+  };
+
+  const handleAddItem = () => {
+    const defaultProd = products[0];
+    setEditItems([
+      ...editItems,
+      {
+        product_id: defaultProd ? defaultProd.id : 1,
+        quantity: 1,
+        unit_price: defaultProd ? (defaultProd.selling_rate || defaultProd.rate_per_pc || 0) : 0,
+      },
+    ]);
+  };
+
+  const handleRemoveItem = (index) => {
+    if (editItems.length <= 1) {
+      addToast("A sale transaction must have at least one product piece. Void the sale instead if cancelling.", "error");
+      return;
+    }
+    const updated = editItems.filter((_, idx) => idx !== index);
+    setEditItems(updated);
+  };
+
+  // Save Sale Correction
+  const handleSaveCorrection = async (e) => {
+    e.preventDefault();
+    if (!editingSale) return;
+
+    if (editItems.length === 0) {
+      addToast("Must include at least one item", "error");
+      return;
+    }
+
+    for (const it of editItems) {
+      if (!it.product_id || it.quantity <= 0) {
+        addToast("All items must have a valid product and quantity of at least 1 piece", "error");
+        return;
+      }
+    }
+
+    setSavingCorrection(true);
+    try {
+      const payload = {
+        employee_id: editEmployeeId ? parseInt(editEmployeeId, 10) : editingSale.employee_id,
+        location_id: editLocationId ? parseInt(editLocationId, 10) : editingSale.location_id,
+        correction_reason: editReason.trim() || "Admin corrected pieces sold / SKU models",
+        items: editItems.map((it) => ({
+          product_id: it.product_id,
+          quantity: it.quantity,
+        })),
+      };
+
+      const res = await updateSale(editingSale.id, payload);
+      addToast(res.message || `Sale #${editingSale.id} corrected and inventory rebalanced!`, "success");
+      handleCloseEditSaleModal();
+      await loadSales();
+    } catch (err) {
+      console.error("Failed to correct sale:", err);
+      addToast(err.message || "Failed to update sale", "error");
+    } finally {
+      setSavingCorrection(false);
+    }
+  };
+
+  // Void / Delete Sale
+  const handleConfirmDelete = async () => {
+    if (!deletingSale) return;
+    setDeletingLoading(true);
+    try {
+      const res = await deleteSale(deletingSale.id);
+      addToast(res.message || `Sale #${deletingSale.id} voided and pieces returned to store inventory.`, "success");
+      setDeletingSale(null);
+      await loadSales();
+    } catch (err) {
+      console.error("Failed to delete sale:", err);
+      addToast(err.message || "Failed to void sale", "error");
+    } finally {
+      setDeletingLoading(false);
+    }
+  };
+
   return (
     <Layout
       title="Sales Dashboard"
-      subtitle="Analyze catalog index-wise SKU performance, opening/closing stock, and sales volume"
+      subtitle="Analyze catalog index-wise SKU performance, opening/closing stock, and correct employee sales records"
       action={
         <div className="flex flex-wrap gap-2">
           <button
@@ -204,6 +401,19 @@ const AdminSales = () => {
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition shadow-sm"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedStockProduct(null);
+              setStockModalOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 shadow-sm transition"
+            title="Log real physical count or incoming shipment pieces/cases to warehouse"
+          >
+            <PackagePlus className="w-3.5 h-3.5" />
+            <span>+ Add Stock</span>
           </button>
 
           <button
@@ -402,385 +612,514 @@ const AdminSales = () => {
           </div>
         </div>
 
-        {/* ---------------- NEW DEDICATED SECTION: INDIVIDUAL INDEX WISE SALES ---------------- */}
-        <div className="rounded-2xl border-2 border-indigo-200 bg-white shadow-sm overflow-hidden">
-          {/* Section Header */}
-          <div className="p-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center shrink-0">
-                <Tag className="w-5 h-5 text-indigo-300" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-base font-bold text-white tracking-wide">
-                    Individual Index-Wise Sales Summary
-                  </h2>
-                  <span className="px-2 py-0.5 rounded-full bg-indigo-500/30 border border-indigo-400/40 text-[10px] font-bold text-indigo-200 uppercase tracking-wider">
-                    Official CSD Catalog
-                  </span>
-                </div>
-                <p className="text-xs text-indigo-200/80 mt-0.5">
-                  Complete index number breakdown showing selling price, pieces & cases sold, and revenue per SKU.
-                </p>
-              </div>
-            </div>
-
-            {/* View Unit Switcher */}
-            <div className="flex items-center gap-2 bg-slate-800/80 p-1 rounded-xl border border-indigo-400/20 self-start md:self-auto">
-              <span className="text-[10px] font-semibold text-indigo-200 px-2 uppercase tracking-wider">
-                Display:
-              </span>
-              <button
-                type="button"
-                onClick={() => setViewUnit("pieces")}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                  viewUnit === "pieces"
-                    ? "bg-indigo-600 text-white shadow"
-                    : "text-slate-300 hover:text-white"
-                }`}
-              >
-                <PackageCheck className="w-3.5 h-3.5" /> Pieces (PCS)
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewUnit("cases")}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                  viewUnit === "cases"
-                    ? "bg-indigo-600 text-white shadow"
-                    : "text-slate-300 hover:text-white"
-                }`}
-              >
-                <Boxes className="w-3.5 h-3.5" /> Cases (Boxes)
-              </button>
-            </div>
-          </div>
-
-          {/* Controls Bar */}
-          <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2.5">
-              {/* Search */}
-              <div className="relative min-w-64">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  value={indexSearch}
-                  onChange={(e) => setIndexSearch(e.target.value)}
-                  placeholder="Search Index No (e.g. #36812), Model, Colour..."
-                  className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-
-              {/* Brand Filter */}
-              <select
-                value={selectedBrand}
-                onChange={(e) => setSelectedBrand(e.target.value)}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none"
-              >
-                <option value="all">All Brands (SAFARI & U/J)</option>
-                <option value="SAFARI">SAFARI Only</option>
-                <option value="URBEN JUNGLE">URBEN JUNGLE Only</option>
-              </select>
-
-              {/* Sales Status Filter */}
-              <div className="flex items-center rounded-xl border border-slate-200 bg-white p-0.5 text-xs font-medium">
-                <button
-                  type="button"
-                  onClick={() => setSalesFilter("all")}
-                  className={`px-2.5 py-1 rounded-lg ${
-                    salesFilter === "all" ? "bg-slate-900 text-white font-bold" : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  All 100 SKU's
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSalesFilter("sold_only")}
-                  className={`px-2.5 py-1 rounded-lg flex items-center gap-1 ${
-                    salesFilter === "sold_only" ? "bg-emerald-600 text-white font-bold" : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  <TrendingUp className="w-3 h-3" /> Sold SKU's Only
-                </button>
-              </div>
-            </div>
-
-            {/* Sort Dropdown */}
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-semibold text-slate-500">Sort by:</span>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700"
-              >
-                <option value="pieces_sold">Volume Sold (High to Low)</option>
-                <option value="revenue">Total Revenue (High to Low)</option>
-                <option value="price">Selling Price</option>
-                <option value="index_no">Index Number</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => setSortOrder((o) => (o === "asc" ? "desc" : "asc"))}
-                className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
-                title={`Order: ${sortOrder.toUpperCase()}`}
-              >
-                <ArrowUpDown className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-
-          {/* Quick Stats Pill Header */}
-          <div className="px-5 py-2.5 bg-indigo-50/50 border-b border-indigo-100 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-3 text-slate-600 flex-wrap">
-              <span>
-                Showing <strong className="text-slate-900 font-bold">{filteredIndexSales.length}</strong> Index SKU's
-              </span>
-              <span>·</span>
-              <span>
-                Opening: <strong className="text-amber-700 font-black">{indexViewTotals.opening} PCS</strong>
-              </span>
-              <span>·</span>
-              <span>
-                Sold in View: <strong className="text-indigo-700 font-black">{indexViewTotals.pieces} PCS</strong>
-                {indexViewTotals.cases > 0 && (
-                  <span className="text-indigo-500 font-medium ml-1">
-                    (≈ {indexViewTotals.cases} Cases)
-                  </span>
-                )}
-              </span>
-              <span>·</span>
-              <span>
-                Closing: <strong className="text-violet-700 font-black">{indexViewTotals.closing} PCS</strong>
-              </span>
-              <span>·</span>
-              <span>
-                Value in View: <strong className="text-emerald-700 font-black">₹{indexViewTotals.revenue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
-              </span>
-            </div>
+        {/* PRIMARY VIEW NAVIGATION TABS */}
+        <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveViewTab("index_wise")}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+                activeViewTab === "index_wise"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              <Tag className="w-4 h-4" />
+              <span>Index-Wise SKU Performance ({filteredIndexSales.length})</span>
+            </button>
 
             <button
               type="button"
-              onClick={handleExportIndexCsv}
-              className="inline-flex items-center gap-1 font-semibold text-indigo-700 hover:text-indigo-900 hover:underline"
+              onClick={() => setActiveViewTab("transactions")}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+                activeViewTab === "transactions"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+              }`}
             >
-              <Download className="w-3.5 h-3.5" /> Export this Index Table (CSV)
+              <Receipt className="w-4 h-4" />
+              <span>Employee Sales Counter Records & Corrections ({summary.sales?.length || 0})</span>
             </button>
           </div>
 
-          {/* Index Wise Table */}
-          {loading ? (
-            <div className="py-16 text-center text-xs text-slate-400">Loading Index Sales Data...</div>
-          ) : filteredIndexSales.length === 0 ? (
-            <div className="py-16 text-center text-xs text-slate-400">
-              No product indexes match the current filters.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-100 text-[10px] uppercase font-bold text-slate-600 tracking-wider border-b border-slate-200">
-                  <tr>
-                    <th className="px-4 py-3">CSD Index No.</th>
-                    <th className="px-4 py-3">Model / Product Description</th>
-                    <th className="px-3 py-3">Brand</th>
-                    <th className="px-3 py-3">Colour / Cat</th>
-                    <th className="px-3 py-3 text-right">Case Pack</th>
-                    <th className="px-4 py-3 text-right font-black text-amber-700">Opening Stock</th>
-                    <th className="px-4 py-3 text-right font-black text-indigo-700">Volume Sold</th>
-                    <th className="px-4 py-3 text-right font-black text-violet-700">Closing Stock</th>
-                    <th className="px-4 py-3 text-right">Selling Price (PC)</th>
-                    <th className="px-4 py-3 text-right">Case Price</th>
-                    <th className="px-4 py-3 text-right font-black text-emerald-700">Total Revenue</th>
-                    <th className="px-4 py-3 text-center">Date Sold</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredIndexSales.map((item) => {
-                    const hasSales = item.total_pieces_sold > 0;
-                    return (
-                      <tr
-                        key={item.product_id}
-                        className={`transition hover:bg-indigo-50/40 ${
-                          hasSales ? "bg-white font-normal" : "bg-slate-50/40 text-slate-400"
-                        }`}
-                      >
-                        {/* Index Number */}
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-md font-mono text-xs font-bold ${
-                              hasSales
-                                ? "bg-indigo-100 text-indigo-800 border border-indigo-200"
-                                : "bg-slate-200/60 text-slate-600"
-                            }`}
-                          >
-                            {item.index_no}
-                          </span>
-                        </td>
-
-                        {/* Model Name */}
-                        <td className="px-4 py-3">
-                          <p className={`font-semibold ${hasSales ? "text-slate-900" : "text-slate-600"}`}>
-                            {item.name}
-                          </p>
-                          {item.sub_category && (
-                            <span className="text-[10px] text-slate-400">
-                              {item.sub_category}
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Brand */}
-                        <td className="px-3 py-3 whitespace-nowrap">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
-                              item.brand === "URBEN JUNGLE"
-                                ? "bg-amber-100 text-amber-800"
-                                : "bg-slate-100 text-slate-700"
-                            }`}
-                          >
-                            {item.brand}
-                          </span>
-                        </td>
-
-                        {/* Colour & Category */}
-                        <td className="px-3 py-3 whitespace-nowrap text-slate-600">
-                          {item.colour || "—"}
-                          {item.category && (
-                            <span className="ml-1 text-[10px] font-bold text-slate-400">
-                              ({item.category})
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Case Pack */}
-                        <td className="px-3 py-3 text-right font-mono font-medium text-slate-600">
-                          {item.case_pack} pcs
-                        </td>
-
-                        {/* Opening Stock */}
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
-                          <span className="inline-block px-2 py-0.5 rounded-lg bg-amber-50 text-amber-900 font-bold text-xs border border-amber-200">
-                            {viewUnit === "cases"
-                              ? `${((item.opening_stock || 0) / (item.case_pack || 1)).toFixed(1)} Cases`
-                              : `${item.opening_stock || 0} PCS`}
-                          </span>
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            {viewUnit === "cases"
-                              ? `${item.opening_stock || 0} PCS`
-                              : `${((item.opening_stock || 0) / (item.case_pack || 1)).toFixed(1)} Cases`}
-                          </div>
-                        </td>
-
-                        {/* Volume Sold */}
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
-                          {hasSales ? (
-                            <div>
-                              <span className="inline-block px-2 py-0.5 rounded-lg bg-indigo-100 text-indigo-900 font-black text-xs">
-                                {viewUnit === "cases"
-                                  ? `${item.total_cases_sold} Cases`
-                                  : `${item.total_pieces_sold} PCS`}
-                              </span>
-                              <div className="text-[10px] text-slate-400 mt-0.5">
-                                {viewUnit === "cases"
-                                  ? `${item.total_pieces_sold} PCS`
-                                  : `${item.total_cases_sold} Cases`}
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-slate-300 font-bold">0</span>
-                          )}
-                        </td>
-
-                        {/* Closing Stock */}
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded-lg font-bold text-xs border ${
-                              (item.closing_stock || 0) < 5
-                                ? "bg-rose-50 text-rose-800 border-rose-300 font-black"
-                                : "bg-slate-100 text-slate-800 border-slate-200"
-                            }`}
-                          >
-                            {viewUnit === "cases"
-                              ? `${((item.closing_stock || 0) / (item.case_pack || 1)).toFixed(1)} Cases`
-                              : `${item.closing_stock || 0} PCS`}
-                          </span>
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            {viewUnit === "cases"
-                              ? `${item.closing_stock || 0} PCS`
-                              : `${((item.closing_stock || 0) / (item.case_pack || 1)).toFixed(1)} Cases`}
-                          </div>
-                        </td>
-
-                        {/* Selling Price / PC */}
-                        <td className="px-4 py-3 text-right whitespace-nowrap font-bold text-slate-900">
-                          ₹{Number(item.selling_rate || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                        </td>
-
-                        {/* Case Price */}
-                        <td className="px-4 py-3 text-right whitespace-nowrap text-slate-600">
-                          ₹{Number(item.case_rate || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                        </td>
-
-                        {/* Total Revenue */}
-                        <td className="px-4 py-3 text-right whitespace-nowrap font-black">
-                          {hasSales ? (
-                            <span className="text-emerald-700">
-                              ₹{item.total_revenue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                            </span>
-                          ) : (
-                            <span className="text-slate-300">₹0.00</span>
-                          )}
-                        </td>
-
-                        {/* Date Sold */}
-                        <td className="px-4 py-3 text-center text-slate-600 font-mono text-[11px] whitespace-nowrap">
-                          {item.date_sold || "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-
-                {/* Table Footer / Summary Row */}
-                <tfoot className="bg-slate-100 border-t-2 border-slate-300 font-bold text-slate-900 text-xs">
-                  <tr>
-                    <td colSpan={5} className="px-4 py-3 text-right uppercase tracking-wider text-slate-700">
-                      Index Total ({filteredIndexSales.length} SKU's):
-                    </td>
-                    <td className="px-4 py-3 text-right font-black text-amber-900 whitespace-nowrap">
-                      {viewUnit === "cases"
-                        ? `${(indexViewTotals.opening / (indexViewTotals.cases || 1)).toFixed(1)} Cases`
-                        : `${indexViewTotals.opening} PCS`}
-                    </td>
-                    <td className="px-4 py-3 text-right font-black text-indigo-900 whitespace-nowrap">
-                      {viewUnit === "cases"
-                        ? `${indexViewTotals.cases} Cases`
-                        : `${indexViewTotals.pieces} PCS`}
-                    </td>
-                    <td className="px-4 py-3 text-right font-black text-violet-900 whitespace-nowrap">
-                      {viewUnit === "cases"
-                        ? `${(indexViewTotals.closing / (indexViewTotals.cases || 1)).toFixed(1)} Cases`
-                        : `${indexViewTotals.closing} PCS`}
-                    </td>
-                    <td colSpan={2} className="px-4 py-3 text-center text-slate-400 font-normal">
-                      —
-                    </td>
-                    <td className="px-4 py-3 text-right font-black text-emerald-800 whitespace-nowrap">
-                      ₹{indexViewTotals.revenue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-4 py-3 text-center font-mono text-slate-400">
-                      —
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
+          <div className="text-xs text-slate-500 hidden md:flex items-center gap-2">
+            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span>Admin modifications automatically rebalance live store warehouse inventory</span>
+          </div>
         </div>
 
-        {/* ---------------- EMPLOYEE SALES SECTION ---------------- */}
+        {/* ================= TAB 1: INDIVIDUAL INDEX-WISE SALES SUMMARY ================= */}
+        {activeViewTab === "index_wise" && (
+          <div className="rounded-2xl border-2 border-indigo-200 bg-white shadow-sm overflow-hidden">
+            {/* Section Header */}
+            <div className="p-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center shrink-0">
+                  <Tag className="w-5 h-5 text-indigo-300" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-white tracking-wide">
+                      Individual Index-Wise Sales Summary
+                    </h2>
+                    <span className="px-2 py-0.5 rounded-full bg-indigo-500/30 border border-indigo-400/40 text-[10px] font-bold text-indigo-200 uppercase tracking-wider">
+                      Official CSD Catalog
+                    </span>
+                  </div>
+                  <p className="text-xs text-indigo-200/80 mt-0.5">
+                    Complete index number breakdown showing selling price, pieces & cases sold, and revenue per SKU.
+                  </p>
+                </div>
+              </div>
+
+              {/* View Unit Switcher */}
+              <div className="flex items-center gap-2 bg-slate-800/80 p-1 rounded-xl border border-indigo-400/20 self-start md:self-auto">
+                <span className="text-[10px] font-semibold text-indigo-200 px-2 uppercase tracking-wider">
+                  Display:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setViewUnit("pieces")}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                    viewUnit === "pieces"
+                      ? "bg-indigo-600 text-white shadow"
+                      : "text-slate-300 hover:text-white"
+                  }`}
+                >
+                  <PackageCheck className="w-3.5 h-3.5" /> Pieces (PCS)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewUnit("cases")}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                    viewUnit === "cases"
+                      ? "bg-indigo-600 text-white shadow"
+                      : "text-slate-300 hover:text-white"
+                  }`}
+                >
+                  <Boxes className="w-3.5 h-3.5" /> Cases (Boxes)
+                </button>
+              </div>
+            </div>
+
+            {/* Controls Bar */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2.5">
+                {/* Search */}
+                <div className="relative min-w-64">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={indexSearch}
+                    onChange={(e) => setIndexSearch(e.target.value)}
+                    placeholder="Search Index No (e.g. #36812), Model, Colour..."
+                    className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                {/* Brand Filter */}
+                <select
+                  value={selectedBrand}
+                  onChange={(e) => setSelectedBrand(e.target.value)}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none"
+                >
+                  <option value="all">All Brands (SAFARI & U/J)</option>
+                  <option value="SAFARI">SAFARI Only</option>
+                  <option value="URBEN JUNGLE">URBEN JUNGLE Only</option>
+                </select>
+
+                {/* Sales Status Filter */}
+                <div className="flex items-center rounded-xl border border-slate-200 bg-white p-0.5 text-xs font-medium">
+                  <button
+                    type="button"
+                    onClick={() => setSalesFilter("all")}
+                    className={`px-2.5 py-1 rounded-lg ${
+                      salesFilter === "all" ? "bg-slate-900 text-white font-bold" : "text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    All 100 SKU's
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSalesFilter("sold_only")}
+                    className={`px-2.5 py-1 rounded-lg flex items-center gap-1 ${
+                      salesFilter === "sold_only" ? "bg-emerald-600 text-white font-bold" : "text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    <CheckCircle2 className="w-3 h-3" /> Sold SKU's Only
+                  </button>
+                </div>
+              </div>
+
+              {/* Sort By Controls */}
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-slate-500 font-medium">Sort by:</span>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700"
+                >
+                  <option value="pieces_sold">Pieces Sold</option>
+                  <option value="revenue">Sales Revenue</option>
+                  <option value="index_no">Index Number</option>
+                  <option value="price">Selling Price</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-700"
+                  title="Toggle Sort Direction"
+                >
+                  <ArrowUpDown className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Table */}
+            {filteredIndexSales.length === 0 ? (
+              <div className="py-12 text-center text-slate-400">
+                <Tag className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+                <p className="text-sm font-semibold text-slate-600">No index products matched the current filters.</p>
+                <p className="text-xs text-slate-400 mt-1">Try resetting search or brand selection.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead className="bg-slate-100 text-[11px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">
+                    <tr>
+                      <th className="px-4 py-3">Index No.</th>
+                      <th className="px-4 py-3">Product / Luggage Name</th>
+                      <th className="px-4 py-3">Brand</th>
+                      <th className="px-4 py-3">Colour</th>
+                      <th className="px-4 py-3">Sub-Category</th>
+                      <th className="px-4 py-3 text-center">Pack</th>
+                      <th className="px-4 py-3 text-right bg-amber-50/60 text-amber-900 border-l border-amber-100">
+                        Opening Stock
+                      </th>
+                      <th className="px-4 py-3 text-right bg-indigo-50/60 text-indigo-900">
+                        Volume Sold
+                      </th>
+                      <th className="px-4 py-3 text-right bg-violet-50/60 text-violet-900 border-r border-violet-100">
+                        Closing Stock
+                      </th>
+                      <th className="px-4 py-3 text-right">Selling Rate</th>
+                      <th className="px-4 py-3 text-right">Case Rate</th>
+                      <th className="px-4 py-3 text-right">Total Revenue</th>
+                      <th className="px-4 py-3 text-center">Date Sold</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredIndexSales.map((item) => {
+                      const hasSold = item.total_pieces_sold > 0;
+                      return (
+                        <tr
+                          key={item.product_id}
+                          className={`transition ${hasSold ? "bg-indigo-50/20 font-semibold" : "hover:bg-slate-50/80"}`}
+                        >
+                          <td className="px-4 py-2.5 font-mono font-extrabold text-indigo-700 whitespace-nowrap">
+                            #{item.index_no}
+                          </td>
+                          <td className="px-4 py-2.5 font-bold text-slate-900">
+                            {item.name}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                              {item.brand}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 text-slate-600 font-medium">
+                            {item.colour || "—"}
+                          </td>
+                          <td className="px-4 py-2.5 text-slate-500 text-[11px]">
+                            {item.sub_category}
+                          </td>
+                          <td className="px-4 py-2.5 text-center font-mono text-slate-500">
+                            {item.case_pack} pcs
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono font-bold bg-amber-50/30 text-amber-950 whitespace-nowrap border-l border-amber-50">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <span>
+                                {viewUnit === "cases"
+                                  ? `${((item.opening_stock || 0) / item.case_pack).toFixed(1)} Cs`
+                                  : `${item.opening_stock || 0} PCS`}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const prod = products.find((p) => p.id === item.product_id);
+                                  setSelectedStockProduct(prod || { id: item.product_id, case_pack: item.case_pack, selling_rate: item.selling_rate, name: item.name });
+                                  setStockModalOpen(true);
+                                }}
+                                className="p-1 rounded-md text-amber-700 hover:text-amber-900 hover:bg-amber-100 transition"
+                                title={`Add / Update stock for Index #${item.index_no}`}
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono font-black bg-indigo-50/40 whitespace-nowrap">
+                            {hasSold ? (
+                              <span className="text-emerald-700 text-sm">
+                                {viewUnit === "cases"
+                                  ? `${item.total_cases_sold} Cs`
+                                  : `${item.total_pieces_sold} PCS`}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 font-normal">0</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono font-bold bg-violet-50/30 text-violet-950 whitespace-nowrap border-r border-violet-50">
+                            {viewUnit === "cases"
+                              ? `${((item.closing_stock || 0) / item.case_pack).toFixed(1)} Cs`
+                              : `${item.closing_stock || 0} PCS`}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono text-slate-800 whitespace-nowrap">
+                            ₹{item.selling_rate.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono text-slate-500 whitespace-nowrap">
+                            ₹{item.case_rate.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono font-black whitespace-nowrap">
+                            {hasSold ? (
+                              <span className="text-emerald-700">
+                                ₹{item.total_revenue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 font-normal">₹0.00</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 text-center font-mono text-[11px] text-slate-600 whitespace-nowrap">
+                            {item.date_sold || "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot className="bg-slate-100 font-bold border-t-2 border-slate-300 text-slate-900">
+                    <tr>
+                      <td colSpan={6} className="px-4 py-3 text-right uppercase tracking-wider text-xs">
+                        Index Total ({filteredIndexSales.length} SKU's):
+                      </td>
+                      <td className="px-4 py-3 text-right font-black text-amber-900 whitespace-nowrap">
+                        {viewUnit === "cases"
+                          ? `${(indexViewTotals.opening / (indexViewTotals.cases || 1)).toFixed(1)} Cases`
+                          : `${indexViewTotals.opening} PCS`}
+                      </td>
+                      <td className="px-4 py-3 text-right font-black text-indigo-900 whitespace-nowrap">
+                        {viewUnit === "cases"
+                          ? `${indexViewTotals.cases} Cases`
+                          : `${indexViewTotals.pieces} PCS`}
+                      </td>
+                      <td className="px-4 py-3 text-right font-black text-violet-900 whitespace-nowrap">
+                        {viewUnit === "cases"
+                          ? `${(indexViewTotals.closing / (indexViewTotals.cases || 1)).toFixed(1)} Cases`
+                          : `${indexViewTotals.closing} PCS`}
+                      </td>
+                      <td colSpan={2} className="px-4 py-3 text-center text-slate-400 font-normal">
+                        —
+                      </td>
+                      <td className="px-4 py-3 text-right font-black text-emerald-800 whitespace-nowrap">
+                        ₹{indexViewTotals.revenue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className="px-4 py-3 text-center font-mono text-slate-400">
+                        —
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ================= TAB 2: EMPLOYEE SALES TRANSACTIONS & CORRECTIONS ================= */}
+        {activeViewTab === "transactions" && (
+          <div className="rounded-2xl border-2 border-indigo-200 bg-white shadow-sm overflow-hidden space-y-4">
+            {/* Header Banner */}
+            <div className="p-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center shrink-0">
+                  <Receipt className="w-5 h-5 text-indigo-300" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-white tracking-wide">
+                      Employee Sales Counter Transactions & Corrections
+                    </h2>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/30 border border-emerald-400/40 text-[10px] font-bold text-emerald-200 uppercase tracking-wider">
+                      Live Editable
+                    </span>
+                  </div>
+                  <p className="text-xs text-indigo-200/80 mt-0.5">
+                    Modify the number of pieces sold, replace SKU models, or void erroneous transactions. Live store inventory adjusts automatically.
+                  </p>
+                </div>
+              </div>
+
+              {/* Total Receipts Badge */}
+              <div className="bg-slate-800/80 px-3.5 py-2 rounded-xl border border-indigo-400/20 flex items-center gap-2.5">
+                <span className="text-xs text-indigo-200">Registered Receipts:</span>
+                <span className="text-base font-black text-white">{summary.sales?.length || 0}</span>
+              </div>
+            </div>
+
+            {/* Controls Bar */}
+            <div className="p-4 bg-slate-50 border-y border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              {/* Search */}
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={transactionSearch}
+                  onChange={(e) => setTransactionSearch(e.target.value)}
+                  placeholder="Search by Receipt #ID, Employee Name, Store Canteen, or Model Name..."
+                  className="w-full pl-10 pr-4 py-2 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {/* Staff Filter Dropdown */}
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-slate-400 shrink-0" />
+                <select
+                  value={selectedEmployee}
+                  onChange={handleEmployeeChange}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none"
+                >
+                  <option value="">All Employees ({employees.length})</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={String(emp.id)}>
+                      {emp.name} ({emp.employee_id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Transactions List */}
+            {filteredTransactions.length === 0 ? (
+              <div className="py-16 text-center text-slate-400">
+                <Receipt className="w-12 h-12 mx-auto text-slate-300 mb-3" />
+                <p className="text-base font-bold text-slate-700">No sales transactions found</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Sales entered by staff at retail counters will appear here for audit and correction.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100 p-2 sm:p-4 space-y-3">
+                {filteredTransactions.map((sale) => (
+                  <div
+                    key={sale.id}
+                    className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm hover:border-indigo-300 transition"
+                  >
+                    {/* Top Row: Info & Action Buttons */}
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center justify-center font-black text-sm">
+                          #{sale.id}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-extrabold text-slate-900 text-sm">
+                              Receipt #{sale.id}
+                            </span>
+                            <span className="text-xs text-slate-400">•</span>
+                            <span className="text-xs text-slate-600 font-semibold flex items-center gap-1">
+                              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                              {sale.formatted_datetime || sale.formatted_date || sale.sale_date}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5 flex-wrap">
+                            <span>Staff: <strong className="text-slate-800">{sale.employee_name}</strong> {sale.employee_code ? `(${sale.employee_code})` : ""}</span>
+                            <span>•</span>
+                            <span className="flex items-center gap-1 text-indigo-700 font-medium">
+                              <Store className="w-3 h-3" /> {sale.location_name}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 self-end md:self-auto">
+                        <div className="text-right pr-2">
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Volume</span>
+                          <span className="text-base font-black text-slate-900">{sale.total_pieces} PCS</span>
+                        </div>
+                        <div className="text-right pr-3 border-r border-slate-200">
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Amount</span>
+                          <span className="text-base font-black text-emerald-700 font-mono">
+                            ₹{Number(sale.total_cost || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditSaleModal(sale)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition"
+                            title="Modify pieces sold or SKU items"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>Modify / Correct</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeletingSale(sale)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition"
+                            title="Void sale and return pieces to inventory"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Void</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Bottom Row: Line Items Breakdown */}
+                    <div className="pt-3">
+                      <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-2">
+                        Pieces & SKUs Sold in this Transaction ({sale.items?.length || 0} Line Items):
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {(sale.items || []).map((it, idx) => (
+                          <div
+                            key={idx}
+                            className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between text-xs"
+                          >
+                            <div className="min-w-0 pr-2">
+                              <span className="font-mono font-extrabold text-indigo-700 block text-[11px]">
+                                #{it.index_no}
+                              </span>
+                              <span className="font-bold text-slate-800 truncate block">
+                                {it.product_name}
+                              </span>
+                              <span className="text-[10px] text-slate-400 block">
+                                {it.brand} {it.colour ? `• ${it.colour}` : ""}
+                              </span>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="font-black text-slate-900 block text-xs bg-indigo-100/70 text-indigo-900 px-2 py-0.5 rounded-lg">
+                                {it.quantity} PCS
+                              </span>
+                              <span className="text-[10px] text-emerald-700 font-mono block mt-0.5 font-bold">
+                                ₹{(it.quantity * (it.unit_price || 0)).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ---------------- EMPLOYEE AGGREGATES CARDS ---------------- */}
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
           <div className="p-5 border-b border-slate-100 flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
             <div>
-              <h2 className="font-bold text-slate-900">Individual Employee Sales</h2>
+              <h2 className="font-bold text-slate-900">Individual Employee Sales Roster</h2>
               <p className="text-xs text-slate-500 mt-1">
                 Select an employee to isolate their transactions and export personalized statements.
               </p>
@@ -834,6 +1173,310 @@ const AdminSales = () => {
           </div>
         </div>
       </div>
+
+      {/* ================= MODAL: MODIFY / CORRECT EMPLOYEE SALE ================= */}
+      {editingSale && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto border border-slate-100 animate-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between sticky top-0 z-10">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-white/10 rounded-xl text-white">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold">Modify Sale Receipt #{editingSale.id}</h3>
+                  <p className="text-xs text-indigo-200">
+                    Correct pieces sold, modify SKUs, or rebalance store counter inventory
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseEditSaleModal}
+                className="p-1.5 text-white/70 hover:text-white hover:bg-white/10 rounded-xl transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleSaveCorrection} className="p-6 space-y-5">
+              {/* Context Banner */}
+              <div className="p-3.5 rounded-2xl bg-indigo-50/80 border border-indigo-200/80 text-xs text-indigo-950 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-indigo-900">
+                  <CheckCircle2 className="w-4 h-4 text-indigo-600" />
+                  <span>Automatic Inventory Rebalancing Active:</span>
+                </div>
+                <p className="text-indigo-800 text-[11px] leading-relaxed">
+                  Decreasing pieces returns stock to the store warehouse. Increasing pieces or changing models checks store availability and deducts stock automatically.
+                </p>
+              </div>
+
+              {/* Store & Staff Selectors */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Store Counter Location <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={editLocationId}
+                    onChange={(e) => setEditLocationId(parseInt(e.target.value, 10))}
+                    className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    required
+                  >
+                    {locations.map((loc) => (
+                      <option key={loc.id} value={loc.id}>
+                        {loc.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Submitting Employee <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={editEmployeeId}
+                    onChange={(e) => setEditEmployeeId(parseInt(e.target.value, 10))}
+                    className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    required
+                  >
+                    {employees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.name} ({emp.employee_id})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Items List: What pieces sold and No of pieces sold */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-800">
+                    Line Items (Pieces & SKU Models Sold) <span className="text-rose-500">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleAddItem}
+                    className="inline-flex items-center gap-1 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl border border-indigo-200 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Another Piece / SKU</span>
+                  </button>
+                </div>
+
+                <div className="space-y-2.5">
+                  {editItems.map((item, index) => {
+                    const lineTotal = (item.quantity || 0) * (item.unit_price || 0);
+                    return (
+                      <div
+                        key={index}
+                        className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3"
+                      >
+                        {/* SKU Selector (What was sold) */}
+                        <div className="flex-1">
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                            Item #{index + 1}: Luggage Model / Index
+                          </span>
+                          <select
+                            value={item.product_id}
+                            onChange={(e) => handleItemProductChange(index, e.target.value)}
+                            className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                          >
+                            {products.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                #{p.index_no} • {p.name} ({p.brand}) — ₹{p.selling_rate || p.rate_per_pc}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Quantity (No of pieces sold) */}
+                        <div className="w-32 shrink-0">
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                            Pieces Sold
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => handleItemQuantityChange(index, e.target.value)}
+                              className="w-full text-sm font-black px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white text-center outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900"
+                              required
+                            />
+                            <span className="text-xs font-bold text-slate-500">PCS</span>
+                          </div>
+                        </div>
+
+                        {/* Subtotal & Delete */}
+                        <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-1 sm:pt-4">
+                          <div className="text-right">
+                            <span className="block text-[10px] text-slate-400 font-semibold uppercase">Subtotal</span>
+                            <span className="font-mono font-black text-xs text-emerald-700">
+                              ₹{lineTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                          {editItems.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(index)}
+                              className="p-1.5 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg transition"
+                              title="Remove item"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Correction Summary Card */}
+              {(() => {
+                const totalPieces = editItems.reduce((acc, it) => acc + (it.quantity || 0), 0);
+                const totalCost = editItems.reduce((acc, it) => acc + (it.quantity || 0) * (it.unit_price || 0), 0);
+                const originalPieces = editingSale.total_pieces || 0;
+                const pcsDiff = totalPieces - originalPieces;
+
+                return (
+                  <div className="p-4 rounded-2xl bg-slate-900 text-white flex items-center justify-between flex-wrap gap-3">
+                    <div>
+                      <span className="block text-[10px] uppercase font-bold text-slate-400">Corrected Volume</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl font-black">{totalPieces} PCS</span>
+                        {pcsDiff !== 0 && (
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                            pcsDiff > 0 ? "bg-amber-500/20 text-amber-300" : "bg-emerald-500/20 text-emerald-300"
+                          }`}>
+                            {pcsDiff > 0 ? `+${pcsDiff} PCS (More)` : `${pcsDiff} PCS (Returned)`}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="block text-[10px] uppercase font-bold text-slate-400">Corrected Total Amount</span>
+                      <span className="text-xl font-black font-mono text-emerald-400">
+                        ₹{totalCost.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Correction Reason */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                  Reason for Correction (Optional Remark)
+                </label>
+                <input
+                  type="text"
+                  value={editReason}
+                  onChange={(e) => setEditReason(e.target.value)}
+                  placeholder="e.g. Employee recorded incorrect Index #36812, corrected to #36813; Adjusted pieces from 5 to 3"
+                  className="w-full text-xs font-medium px-3.5 py-2 rounded-xl border border-slate-300 outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800"
+                />
+              </div>
+
+              {/* Modal Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={handleCloseEditSaleModal}
+                  disabled={savingCorrection}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingCorrection}
+                  className="px-5 py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl shadow-md shadow-indigo-600/30 transition flex items-center gap-2"
+                >
+                  {savingCorrection ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving & Rebalancing...</span>
+                    </>
+                  ) : (
+                    <span>Save Corrections & Balance Inventory</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: VOID / DELETE CONFIRMATION ================= */}
+      {deletingSale && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-100 animate-in zoom-in-95 duration-150">
+            <div className="p-6 text-center space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Void Sale Receipt #{deletingSale.id}?
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Submitted by <strong>{deletingSale.employee_name}</strong> at <strong>{deletingSale.location_name}</strong>.
+                </p>
+              </div>
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-900 text-left">
+                All <strong>{deletingSale.total_pieces} PCS</strong> across {deletingSale.items?.length || 0} items will be automatically returned to <strong>{deletingSale.location_name}</strong> warehouse inventory.
+              </div>
+              <div className="flex items-center justify-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeletingSale(null)}
+                  disabled={deletingLoading}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDelete}
+                  disabled={deletingLoading}
+                  className="px-5 py-2.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 rounded-xl shadow-md shadow-rose-600/30 transition flex items-center gap-1.5"
+                >
+                  {deletingLoading ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Voiding...</span>
+                    </>
+                  ) : (
+                    <span>Yes, Void & Return Stock</span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: ADD / UPDATE STOCK ================= */}
+      <StockEntryModal
+        isOpen={stockModalOpen}
+        onClose={() => {
+          setStockModalOpen(false);
+          setSelectedStockProduct(null);
+        }}
+        onSuccess={() => {
+          loadSales();
+        }}
+        products={products}
+        locations={locations}
+        isAdmin={true}
+        initialProduct={selectedStockProduct}
+      />
     </Layout>
   );
 };

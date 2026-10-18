@@ -202,6 +202,19 @@ export const getSales = async (params = {}) => {
   return await fetchApi(endpoint);
 };
 
+export const updateSale = async (saleId, saleData) => {
+  return await fetchApi(`/sales/${saleId}`, {
+    method: "PUT",
+    body: JSON.stringify(saleData),
+  });
+};
+
+export const deleteSale = async (saleId) => {
+  return await fetchApi(`/sales/${saleId}`, {
+    method: "DELETE",
+  });
+};
+
 // --- Employee API ---
 export const getEmployees = async () => {
   return await fetchApi("/employees/");
@@ -423,6 +436,8 @@ export default {
   exportDamagesCsvUrl,
   createSale,
   getSales,
+  updateSale,
+  deleteSale,
   getEmployees,
   createEmployee,
   updateEmployee,

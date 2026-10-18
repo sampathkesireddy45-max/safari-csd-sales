@@ -1,7 +1,7 @@
 # Safari CSD Sales & Stock Telemetry - Session Checkpoint
 
-**Last Saved Timestamp:** October 18, 2026 - 21:40 IST  
-**Conversation ID:** `c5cac8be-450b-42f8-aca6-df8d20ae1aec`  
+**Last Saved Timestamp:** October 18, 2026 - 22:48 IST  
+**Conversation ID:** `0dde77ff-05ae-4161-8b6b-becd775c444e` (resumed from `c5cac8be-450b-42f8-aca6-df8d20ae1aec`)  
 **Workspace Path:** `C:\Users\sampa\overall sales`  
 
 ---
@@ -152,18 +152,46 @@
   - Added `refreshUser` helper in `AuthContext.jsx` and mounted automatic refresh on `Sidebar.jsx`, `SalesEntry.jsx`, `EmployeeDashboard.jsx`, and `EmployeeSalesDashboard.jsx`.
   - Whenever an admin reassigns an employee's store counter in the Admin Portal (`/admin/employees` or `/admin/locations`), the employee's assigned store name and counter details update dynamically in the employee portal.
   - Added assigned store outlet badge and counter validation to `SalesEntry.jsx` and `Sidebar.jsx`.
-- **Employee Sales & Stock Dashboard (`/employee/sales-dashboard`)**:
-  - Added dedicated page `EmployeeSalesDashboard.jsx` accessible from `Sidebar.jsx` ("My Sales & Stock") and the staff dashboard banner.
-  - Displays individual sales volume, individual revenue, total opening stock, total closing stock, low stock (<5 PCS), out of stock (0 PCS), and overflow stock (>10 PCS).
-  - Index-wise catalog stock table displaying Index No, Name, Brand, Selling Price, My Sold Pieces, Opening Stock, Closing Stock, and Stock Status.
-  - **Editable Opening Stock**: Staff can edit **Opening Stock only** via an inline modal. Validates that opening stock cannot be less than volume already sold in the period. Closing stock is automatically recalculated (`Closing = Opening - Sold`), updating the live store inventory and writing an `opening_stock_adjustment` transaction audit log.
-  - **Sales History Tab**: Lists individual counter sales receipts with IST timestamps, total amounts, and SKU breakdown.
+### H. Accurate Individual Store & Overall Network Opening vs Closing Stock Telemetry
+- **Backend Analytics Engine (`employee.py`)**:
+  - Enhanced `/employees/sales-dashboard` to calculate and return three distinct levels of inventory & sales telemetry:
+    1. **Individual Staff Performance**: `my_pieces_sold`, `my_cases_sold`, `my_revenue`, and individual transaction count.
+    2. **Selected Store Counter**: `store_opening_stock`, `store_closing_stock`, `store_pieces_sold`, and `store_revenue`.
+    3. **Overall Network Combined (All 8 Canteen Nodes)**: `overall_opening_stock`, `overall_closing_stock`, `overall_pieces_sold`, and `overall_revenue`.
+  - Supports query parameter `location_id` (`""`/none for assigned store, specific store ID, or `"all"` for network-wide aggregate).
+  - Updated `/employees/sales-dashboard/opening-stock` to support `location_id` so editing opening stock writes directly to the specific store node's live inventory and computes `Closing = Opening - Volume Sold at that store`.
+- **Employee Portal Dashboard UI (`EmployeeSalesDashboard.jsx`)**:
+  - **Store Filter Switcher**: Quick-toggle buttons between **"My Assigned Store"**, **"All Stores Combined (Overall Network)"**, and a dropdown to inspect any of the 8 individual CSD canteen stores.
+  - **Two-Tier Metric Bands**:
+    - **Band 1 (Individual Store)**: Store Opening Stock (Editable starting count), Store Closing Stock (Live physical stock), Store Volume Sold, and My Personal Counter Sales.
+    - **Band 2 (Overall Network)**: Combined Opening Stock across all 8 stores, Combined Closing Stock, Overall Volume Sold, and Stock Health status breakdown.
+  - **Dual Stock Table Columns**:
+    - Index No, Model Name & Specs, Selling Rate, My Sold Pieces & Revenue.
+    - **Store Opening Stock** & **Store Closing Stock** (with pieces/cases toggle & case breakdown).
+    - **Overall Opening Stock** & **Overall Closing Stock** (with pieces/cases toggle & case breakdown).
+    - Stock Status badge (Out of stock, Low stock <5, Optimal, Overflow >10).
+    - **Inline Store Opening Editor**: Allows editing opening stock specifically per selected store counter with real-time closing stock preview.
+
+### I. Restored Sales Transactions & Admin Stock Management
+- **Admin Sales Dashboard (`AdminSales.jsx`)**:
+  - **Dual Primary View Switcher**:
+    - **Tab 1: "Index-Wise SKU Performance"**: Complete 100-SKU catalog breakdown with Brand filters, Pieces vs. Cases view toggle, Index No. search, and CSV/XLSX export.
+    - **Tab 2: "Employee Sales Counter Records & Corrections"**: Searchable list of all registered receipts showing receipt #ID, submitter, counter location, date/time, total pieces, and item breakdown.
+  - **Live Sale Modification Modal**: Admin can correct pieces sold and SKU models per line item with real-time net piece difference badges and automated store inventory rebalancing via `PUT /sales/{id}`.
+  - **Void / Delete Modal**: Admin can void erroneous transactions with instant stock restoration to the store counter warehouse via `DELETE /sales/{id}`.
+  - **Direct Warehouse Stock Addition**:
+    - Primary **`+ Add Stock`** button in the header action bar.
+    - Quick `+` stock icon button directly on each product row in the Index-Wise catalog table.
+    - Fully integrated with `<StockEntryModal>` for adding pieces or cases to any store location on the fly.
+- **Main Admin Dashboard Sales Register (`AdminDashboard.jsx`)**:
+  - Removed the sales transaction table and individual transaction listings from the **Sales Register** section.
+  - Retained high-level sales volume (`PCS`), total sales value (`₹`), export actions, and the quick navigation button to the dedicated Index-Wise Sales page.
 
 ---
 
 ## 4. Key Files
-- `frontend/src/pages/EmployeeSalesDashboard.jsx`: Dedicated employee sales & stock dashboard with opening/closing stock analysis, stock alerts, and opening stock editor.
-- `backend/app/routers/employee.py`: Staff dashboard stats and sales dashboard endpoints (`/employees/sales-dashboard` and `/employees/sales-dashboard/opening-stock`).
+- `frontend/src/pages/EmployeeSalesDashboard.jsx`: Staff sales dashboard with individual store vs overall network opening and closing stock, store filter switcher, and inline opening stock editor.
+- `backend/app/routers/employee.py`: Staff dashboard stats and sales dashboard endpoints (`/employees/sales-dashboard` and `/employees/sales-dashboard/opening-stock`) with store-level and network-level stock calculations.
 - `frontend/src/pages/AdminSales.jsx`: Streamlined sales dashboard with Index-Wise SKU breakdown, Opening Stock, Volume Sold, Closing Stock, brand filters, and clean CSV/XLSX exports.
 - `frontend/src/pages/SalesEntry.jsx`: Sales counter with real-time stock availability verification, instant decrementation, live counter stock badges, and assigned store banner.
 - `frontend/src/context/AuthContext.jsx`: Auth context providing session persistence and `refreshUser` for dynamic store reassignments.
@@ -180,4 +208,5 @@ When the user says:
 - `"continue sales"`
 - or references this project:
 Check that both backend (`http://localhost:8000`) and frontend (`http://localhost:5173`) are running, read this checkpoint, and resume immediately.
+
 

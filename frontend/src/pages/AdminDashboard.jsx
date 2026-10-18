@@ -534,7 +534,7 @@ const AdminDashboard = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="rounded-xl bg-slate-50 border border-slate-100 p-4">
                 <p className="text-xs font-semibold text-slate-500">
                   {selectedSalesEmployee ? "Selected employee sales" : "Overall sales"}
@@ -543,48 +543,11 @@ const AdminDashboard = () => {
                   {salesSummary.overall.total_pieces.toLocaleString("en-IN")} <span className="text-xs font-semibold text-slate-400">PCS</span>
                 </p>
               </div>
-              <div className="rounded-xl bg-slate-50 border border-slate-100 p-4">
-                <p className="text-xs font-semibold text-slate-500">Sale transactions</p>
-                <p className="text-2xl font-black text-slate-900 mt-2">{salesSummary.overall.sale_count.toLocaleString("en-IN")}</p>
-              </div>
               <div className="rounded-xl bg-amber-50 border border-amber-100 p-4">
                 <p className="text-xs font-semibold text-amber-700">Sale value</p>
                 <p className="text-2xl font-black text-amber-950 mt-2">₹{Number(salesSummary.overall.total_cost || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
               </div>
             </div>
-
-            {salesLoading ? (
-              <div className="py-8 text-center text-xs text-slate-400">Loading sales records...</div>
-            ) : salesSummary.sales.length === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-400">No sales entered yet. Sales will appear here after the first completed transaction.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-slate-700">
-                  <thead className="border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-400">
-                    <tr><th className="py-3">Date</th><th>Employee</th><th>Location</th><th>Line items</th><th>Cost</th><th className="text-right">Pieces</th></tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {salesSummary.sales.map((sale) => (
-                      <tr key={sale.id}>
-                        <td className="py-3">
-                          <div className="font-medium text-slate-800">
-                            {sale.formatted_date || (sale.sale_date ? new Date(sale.sale_date).toLocaleDateString() : "—")}
-                          </div>
-                          <div className="text-[10px] text-slate-400">
-                            {sale.formatted_time || (sale.sale_date ? new Date(sale.sale_date).toLocaleTimeString() : "")}
-                          </div>
-                        </td>
-                        <td className="font-medium">{sale.employee_name}</td>
-                        <td>{sale.location_name}</td>
-                        <td>{sale.item_count}</td>
-                        <td>₹{Number(sale.total_cost || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                        <td className="text-right font-bold text-emerald-700">{sale.total_pieces}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </div>
 
           {/* 7-Day Live Activity & Defect Velocity Chart */}

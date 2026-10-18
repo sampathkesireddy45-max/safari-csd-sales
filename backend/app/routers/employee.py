@@ -124,12 +124,14 @@ class OpeningStockUpdateRequest(BaseModel):
     product_id: int
     opening_stock: int = Field(..., ge=0)
     employee_id: Optional[int] = None
+    location_id: Optional[int] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
 
 @router.get("/sales-dashboard")
 def get_employee_sales_dashboard(
     employee_id: Optional[int] = Query(None),
+    location_id: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     db: Session = Depends(get_db),
@@ -143,84 +145,176 @@ def get_employee_sales_dashboard(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    sales_q = db.query(Sale).filter(Sale.employee_id == target_id)
+    start_utc = None
+    end_utc = None
     if date_from:
         try:
             start_utc = ist_date_to_utc_bounds(date_from, is_end_date=False)
-            sales_q = sales_q.filter(Sale.sale_date >= start_utc)
         except Exception:
-            sales_q = sales_q.filter(Sale.sale_date >= datetime.fromisoformat(date_from))
+            start_utc = datetime.fromisoformat(date_from)
     if date_to:
         try:
             end_utc = ist_date_to_utc_bounds(date_to, is_end_date=True)
-            sales_q = sales_q.filter(Sale.sale_date <= end_utc)
         except Exception:
-            sales_q = sales_q.filter(Sale.sale_date <= datetime.fromisoformat(date_to) + timedelta(days=1))
+            end_utc = datetime.fromisoformat(date_to) + timedelta(days=1)
 
-    all_sales = sales_q.order_by(Sale.sale_date.desc()).all()
+    # 1. All active store locations
+    all_locations = db.query(Location).filter(Location.is_active == True).order_by(Location.name).all()
 
-    product_sales_map = {}
-    for sale in all_sales:
+    # 2. Determine target store location for individual store metrics
+    selected_loc_id = None
+    is_all_stores = False
+    if location_id is not None:
+        loc_str = str(location_id).strip().lower()
+        if loc_str in ["all", "0", "overall", "network"]:
+            is_all_stores = True
+        else:
+            try:
+                selected_loc_id = int(loc_str)
+            except ValueError:
+                selected_loc_id = employee.assigned_location_id
+    else:
+        selected_loc_id = employee.assigned_location_id
+
+    selected_location = None
+    if selected_loc_id:
+        selected_location = db.query(Location).filter(Location.id == selected_loc_id).first()
+
+    assigned_loc_name = employee.assigned_location.name if employee.assigned_location else "Not assigned"
+
+    # 3. Employee's individual sales
+    emp_sales_q = db.query(Sale).filter(Sale.employee_id == target_id)
+    if start_utc:
+        emp_sales_q = emp_sales_q.filter(Sale.sale_date >= start_utc)
+    if end_utc:
+        emp_sales_q = emp_sales_q.filter(Sale.sale_date <= end_utc)
+    all_emp_sales = emp_sales_q.order_by(Sale.sale_date.desc()).all()
+
+    emp_sales_map = {}
+    for sale in all_emp_sales:
         for it in sale.items:
             pid = it.product_id
-            if pid not in product_sales_map:
-                product_sales_map[pid] = {
+            if pid not in emp_sales_map:
+                emp_sales_map[pid] = {
                     "pieces_sold": 0,
                     "transactions_count": 0,
                 }
-            product_sales_map[pid]["pieces_sold"] += it.quantity
-            product_sales_map[pid]["transactions_count"] += 1
+            emp_sales_map[pid]["pieces_sold"] += it.quantity
+            emp_sales_map[pid]["transactions_count"] += 1
 
-    stock_map = {}
-    location_name = "Not assigned"
-    if employee.assigned_location:
-        location_name = employee.assigned_location.name
+    # 4. Overall Sales (all stores combined)
+    overall_sales_q = db.query(Sale)
+    if start_utc:
+        overall_sales_q = overall_sales_q.filter(Sale.sale_date >= start_utc)
+    if end_utc:
+        overall_sales_q = overall_sales_q.filter(Sale.sale_date <= end_utc)
+    all_overall_sales = overall_sales_q.all()
 
-    if employee.assigned_location_id:
-        inv_rows = db.query(Inventory.product_id, Inventory.quantity).filter(
-            Inventory.location_id == employee.assigned_location_id
+    overall_sales_map = {}
+    for sale in all_overall_sales:
+        for it in sale.items:
+            overall_sales_map[it.product_id] = overall_sales_map.get(it.product_id, 0) + it.quantity
+
+    # 5. Store Sales (selected individual store)
+    store_sales_map = {}
+    if is_all_stores:
+        store_sales_map = overall_sales_map.copy()
+    elif selected_loc_id:
+        store_sales_q = db.query(Sale).filter(Sale.location_id == selected_loc_id)
+        if start_utc:
+            store_sales_q = store_sales_q.filter(Sale.sale_date >= start_utc)
+        if end_utc:
+            store_sales_q = store_sales_q.filter(Sale.sale_date <= end_utc)
+        for sale in store_sales_q.all():
+            for it in sale.items:
+                store_sales_map[it.product_id] = store_sales_map.get(it.product_id, 0) + it.quantity
+
+    # 6. Inventories
+    # Overall stock across all locations
+    overall_inv_rows = db.query(
+        Inventory.product_id,
+        func.coalesce(func.sum(Inventory.quantity), 0)
+    ).group_by(Inventory.product_id).all()
+    overall_stock_map = {row[0]: int(row[1] or 0) for row in overall_inv_rows}
+
+    # Store stock for selected store
+    store_stock_map = {}
+    if is_all_stores:
+        store_stock_map = overall_stock_map.copy()
+    elif selected_loc_id:
+        store_inv_rows = db.query(Inventory.product_id, Inventory.quantity).filter(
+            Inventory.location_id == selected_loc_id
         ).all()
-        stock_map = {row[0]: int(row[1] or 0) for row in inv_rows}
+        store_stock_map = {row[0]: int(row[1] or 0) for row in store_inv_rows}
 
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.index_no, Product.name).all()
 
     items = []
-    total_pieces_sold = 0
-    total_revenue = 0.0
-    total_opening_stock = 0
-    total_closing_stock = 0
+    # Metrics accumulators
+    total_my_sold = 0
+    total_my_revenue = 0.0
+    total_store_opening = 0
+    total_store_closing = 0
+    total_store_sold = 0
+    total_store_revenue = 0.0
+    total_overall_opening = 0
+    total_overall_closing = 0
+    total_overall_sold = 0
+    total_overall_revenue = 0.0
+
     low_stock_count = 0
     out_of_stock_count = 0
     overflow_stock_count = 0
     healthy_stock_count = 0
 
     for p in products:
-        sales_info = product_sales_map.get(p.id, {"pieces_sold": 0, "transactions_count": 0})
-        pieces_sold = sales_info["pieces_sold"]
         rate = p.selling_rate if p.selling_rate is not None else (p.rate_per_pc or 0.0)
-        revenue = round(pieces_sold * rate, 2)
         pack = p.case_pack if p.case_pack and p.case_pack > 0 else 1
 
-        closing_stock = stock_map.get(p.id, 0)
-        opening_stock = closing_stock + pieces_sold
+        # Individual store metrics
+        store_closing = store_stock_map.get(p.id, 0)
+        store_sold = store_sales_map.get(p.id, 0)
+        store_opening = store_closing + store_sold
+        s_rev = round(store_sold * rate, 2)
 
-        if closing_stock == 0:
+        # Overall network metrics (all stores)
+        overall_closing = overall_stock_map.get(p.id, 0)
+        overall_sold = overall_sales_map.get(p.id, 0)
+        overall_opening = overall_closing + overall_sold
+        o_rev = round(overall_sold * rate, 2)
+
+        # Employee's individual sales
+        emp_info = emp_sales_map.get(p.id, {"pieces_sold": 0, "transactions_count": 0})
+        my_sold = emp_info["pieces_sold"]
+        my_rev = round(my_sold * rate, 2)
+
+        # Status badge based on store stock (or overall if all stores selected)
+        check_stock = store_closing
+        if check_stock == 0:
             status_tag = "out_of_stock"
             out_of_stock_count += 1
-        elif closing_stock < 5:
+        elif check_stock < 5:
             status_tag = "low_stock"
             low_stock_count += 1
-        elif closing_stock > 10:
+        elif check_stock > 10:
             status_tag = "overflow"
             overflow_stock_count += 1
         else:
             status_tag = "healthy"
             healthy_stock_count += 1
 
-        total_pieces_sold += pieces_sold
-        total_revenue = round(total_revenue + revenue, 2)
-        total_opening_stock += opening_stock
-        total_closing_stock += closing_stock
+        total_my_sold += my_sold
+        total_my_revenue = round(total_my_revenue + my_rev, 2)
+
+        total_store_opening += store_opening
+        total_store_closing += store_closing
+        total_store_sold += store_sold
+        total_store_revenue = round(total_store_revenue + s_rev, 2)
+
+        total_overall_opening += overall_opening
+        total_overall_closing += overall_closing
+        total_overall_sold += overall_sold
+        total_overall_revenue = round(total_overall_revenue + o_rev, 2)
 
         items.append({
             "product_id": p.id,
@@ -232,22 +326,47 @@ def get_employee_sales_dashboard(
             "sub_category": p.sub_category or "",
             "case_pack": pack,
             "selling_rate": rate,
-            "pieces_sold": pieces_sold,
-            "cases_sold": round(pieces_sold / pack, 2),
-            "revenue": revenue,
-            "transactions_count": sales_info["transactions_count"],
-            "opening_stock": opening_stock,
-            "closing_stock": closing_stock,
-            "closing_cases": closing_stock // pack,
-            "closing_remainder": closing_stock % pack,
+
+            # Employee Individual Sales
+            "my_pieces_sold": my_sold,
+            "my_cases_sold": round(my_sold / pack, 2),
+            "my_revenue": my_rev,
+            "transactions_count": emp_info["transactions_count"],
+
+            # Individual Store Stock & Sales (for active/selected store)
+            "store_opening_stock": store_opening,
+            "store_closing_stock": store_closing,
+            "store_closing_cases": store_closing // pack,
+            "store_closing_remainder": store_closing % pack,
+            "store_pieces_sold": store_sold,
+            "store_cases_sold": round(store_sold / pack, 2),
+            "store_revenue": s_rev,
+
+            # Overall Stock & Sales (All 8 stores combined)
+            "overall_opening_stock": overall_opening,
+            "overall_closing_stock": overall_closing,
+            "overall_closing_cases": overall_closing // pack,
+            "overall_closing_remainder": overall_closing % pack,
+            "overall_pieces_sold": overall_sold,
+            "overall_cases_sold": round(overall_sold / pack, 2),
+            "overall_revenue": o_rev,
+
+            # Backwards-compatible aliases for existing table bindings
+            "pieces_sold": my_sold,
+            "cases_sold": round(my_sold / pack, 2),
+            "revenue": my_rev,
+            "opening_stock": store_opening,
+            "closing_stock": store_closing,
+            "closing_cases": store_closing // pack,
+            "closing_remainder": store_closing % pack,
             "status": status_tag,
-            "has_sales": pieces_sold > 0,
+            "has_sales": (my_sold > 0 or store_sold > 0),
         })
 
-    items.sort(key=lambda x: (-x["pieces_sold"], -x["revenue"], x["index_no"]))
+    items.sort(key=lambda x: (-x["store_pieces_sold"], -x["my_pieces_sold"], -x["my_revenue"], x["index_no"]))
 
     sales_list = []
-    for s in all_sales:
+    for s in all_emp_sales:
         cost = round(sum(
             (it.product.selling_rate if (it.product and it.product.selling_rate is not None) else (it.product.rate_per_pc or 0.0) if it.product else 0.0) * it.quantity
             for it in s.items
@@ -277,6 +396,8 @@ def get_employee_sales_dashboard(
             ]
         })
 
+    selected_loc_name = "All Stores Combined" if is_all_stores else (selected_location.name if selected_location else "Unassigned Store")
+
     return {
         "employee": {
             "id": employee.id,
@@ -284,14 +405,47 @@ def get_employee_sales_dashboard(
             "name": employee.name,
             "email": employee.email,
             "assigned_location_id": employee.assigned_location_id,
-            "assigned_location_name": location_name,
+            "assigned_location_name": assigned_loc_name,
         },
+        "selected_location": {
+            "id": selected_location.id if selected_location else (0 if is_all_stores else None),
+            "location_id": selected_location.location_id if selected_location else ("ALL" if is_all_stores else None),
+            "name": selected_loc_name,
+            "is_all_stores": is_all_stores,
+        },
+        "locations": [
+            {
+                "id": loc.id,
+                "location_id": loc.location_id,
+                "name": loc.name,
+                "is_assigned": (loc.id == employee.assigned_location_id),
+            }
+            for loc in all_locations
+        ],
         "summary": {
-            "total_pieces_sold": total_pieces_sold,
-            "total_revenue": total_revenue,
-            "sales_count": len(all_sales),
-            "total_opening_stock": total_opening_stock,
-            "total_closing_stock": total_closing_stock,
+            # My Individual Sales
+            "my_pieces_sold": total_my_sold,
+            "my_revenue": total_my_revenue,
+            "sales_count": len(all_emp_sales),
+
+            # Individual Store Stock & Sales (Selected Store)
+            "store_opening_stock": total_store_opening,
+            "store_closing_stock": total_store_closing,
+            "store_pieces_sold": total_store_sold,
+            "store_revenue": total_store_revenue,
+
+            # Overall Network Stock & Sales (All Stores Combined)
+            "overall_opening_stock": total_overall_opening,
+            "overall_closing_stock": total_overall_closing,
+            "overall_pieces_sold": total_overall_sold,
+            "overall_revenue": total_overall_revenue,
+
+            # Legacy compatibility fields
+            "total_pieces_sold": total_my_sold,
+            "total_revenue": total_my_revenue,
+            "total_opening_stock": total_store_opening,
+            "total_closing_stock": total_store_closing,
+
             "low_stock_count": low_stock_count,
             "out_of_stock_count": out_of_stock_count,
             "overflow_stock_count": overflow_stock_count,
@@ -316,23 +470,25 @@ def update_employee_opening_stock(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    if not employee.assigned_location_id:
+    target_location_id = req.location_id or employee.assigned_location_id
+    if not target_location_id:
         raise HTTPException(
             status_code=400,
-            detail="You are not currently assigned to any retail store location. Contact your administrator to assign your store."
+            detail="Cannot update opening stock: No store location selected or assigned."
         )
 
     product = db.query(Product).filter(Product.id == req.product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    location = db.query(Location).filter(Location.id == employee.assigned_location_id).first()
+    location = db.query(Location).filter(Location.id == target_location_id).first()
     if not location:
-        raise HTTPException(status_code=404, detail="Assigned store location not found")
+        raise HTTPException(status_code=404, detail="Store location not found")
 
+    # Volume sold at this store during the period
     sales_q = db.query(func.coalesce(func.sum(SaleItem.quantity), 0)).join(Sale, SaleItem.sale_id == Sale.id).filter(
         SaleItem.product_id == req.product_id,
-        Sale.employee_id == employee.id,
+        Sale.location_id == target_location_id,
     )
     if req.date_from:
         try:
@@ -352,21 +508,21 @@ def update_employee_opening_stock(
     if req.opening_stock < pieces_sold:
         raise HTTPException(
             status_code=400,
-            detail=f"Opening stock ({req.opening_stock} PCS) cannot be less than the volume already sold ({pieces_sold} PCS) for {product.name}."
+            detail=f"Opening stock ({req.opening_stock} PCS) cannot be less than the volume already sold ({pieces_sold} PCS) for {product.name} at {location.name}."
         )
 
     new_closing_stock = req.opening_stock - pieces_sold
 
     inv = db.query(Inventory).filter(
         Inventory.product_id == req.product_id,
-        Inventory.location_id == employee.assigned_location_id
+        Inventory.location_id == target_location_id
     ).with_for_update().first()
 
     old_stock = 0
     if not inv:
         inv = Inventory(
             product_id=req.product_id,
-            location_id=employee.assigned_location_id,
+            location_id=target_location_id,
             quantity=new_closing_stock,
             last_updated=datetime.utcnow()
         )

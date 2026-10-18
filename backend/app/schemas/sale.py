@@ -35,6 +35,8 @@ class SaleUpdate(BaseModel):
     location_id: Optional[int] = None
     sale_date: Optional[datetime] = None
     total_pieces: Optional[int] = None
+    items: Optional[List[SaleItemCreate]] = None
+    correction_reason: Optional[str] = None
 
 class SaleInDBBase(SaleBase):
     id: int
