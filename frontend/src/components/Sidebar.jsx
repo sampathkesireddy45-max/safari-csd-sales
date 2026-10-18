@@ -14,7 +14,7 @@ import {
   UserCheck,
   Building2,
   Navigation,
-  Key, BarChart3, Activity, ShoppingCart
+  Key, BarChart3, Activity, ShoppingCart, Scale
 } from "lucide-react";
 
 const Sidebar = () => {
@@ -32,14 +32,17 @@ const Sidebar = () => {
     { label: "Employee Directory", path: "/admin/employees", icon: Users },
     { label: "Reports & Analytics", path: "/admin/reports", icon: BarChart3 },
     { label: "Sales Dashboard", path: "/admin/sales", icon: ShoppingCart },
+    { label: "Stock Reconciliations", path: "/admin/reconciliations", icon: Scale },
     { label: "System Health", path: "/admin/system-health", icon: Activity },
   ];
 
   const employeeLinks = [
     { label: "My Dashboard", path: "/employee/dashboard", icon: LayoutDashboard },
+    { label: "Shift Reconciliation", path: "/employee/reconciliation", icon: Scale },
     { label: "Report Damage & Photo", path: "/employee/damages", icon: AlertOctagon },
     { label: "Sales Entry", path: "/employee/sales-entry", icon: ShoppingBag },
   ];
+
 
   const links = isAdmin ? adminLinks : employeeLinks;
 

@@ -390,6 +390,48 @@ export const getEmployeeDashboardStats = async (employeeId) => {
   return await fetchApi(`/employees/dashboard/${employeeId}`);
 };
 
+export const getReconciliationWorksheet = async (params = {}) => {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") search.append(key, value);
+  });
+  return fetchApi(`/reconciliation/worksheet${search.toString() ? `?${search}` : ""}`);
+};
+
+export const submitReconciliation = async (payload) => {
+  return fetchApi("/reconciliation/submit", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+};
+
+export const getReconciliationHistory = async (params = {}) => {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") search.append(key, value);
+  });
+  return fetchApi(`/reconciliation/history${search.toString() ? `?${search}` : ""}`);
+};
+
+export const getReconciliationDetail = async (id) => {
+  return fetchApi(`/reconciliation/${id}`);
+};
+
+export const verifyReconciliation = async (id, payload) => {
+  return fetchApi(`/reconciliation/${id}/verify`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+};
+
+export const exportReconciliationCsvUrl = (params = {}) => {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") search.append(key, value);
+  });
+  return `${API_BASE_URL}/reconciliation/export/csv${search.toString() ? `?${search}` : ""}`;
+};
+
 export default {
   getToken,
   setToken,
@@ -423,4 +465,11 @@ export default {
   resetInventoryToZero,
   getAdminDashboardStats,
   getEmployeeDashboardStats,
+  getReconciliationWorksheet,
+  submitReconciliation,
+  getReconciliationHistory,
+  getReconciliationDetail,
+  verifyReconciliation,
+  exportReconciliationCsvUrl,
 };
+

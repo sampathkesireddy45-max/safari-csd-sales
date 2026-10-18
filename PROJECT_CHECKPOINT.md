@@ -113,9 +113,39 @@
   - Standardized terminology across the sales dashboard from `"SKUs"` to `"SKU's"` (`Index SKU's Active`, `/ 100 SKU's`, `All 100 SKU's`, `Sold SKU's Only`, `Showing X Index SKU's`, and `Index Total (X SKU's)`).
   - Aligned the Index-Wise table column in the UI to display `"Date Sold"` instead of `"Txns"`.
 
+### H. Daily Shift Opening & Closing Stock Reconciliation
+- **Data Model & Backend Architecture (`reconciliation.py`)**:
+  - `ShiftReconciliation`: captures store counter, audit date, shift type (`opening`, `closing`, `daily`), submitter, expected pieces, physical pieces, net variance, discrepancy counts, auto-inventory sync flag, supervisor verifier ID, and remarks.
+  - `ReconciliationItem`: captures individual product SKUs, starting stock, received units, sales count today, damage count today, expected count, physical counted pieces, variance (`physical - expected`), and specific discrepancy notes.
+  - Automatic inventory sync: updates live stock records in `inventory` table and writes an audit transaction in `inventory_transactions` with type `reconciliation_adjustment`.
+- **Backend API Endpoints (`/reconciliation`)**:
+  - `GET /reconciliation/worksheet`: fetches live worksheet with current recorded counter stock, today's sales, and damages.
+  - `POST /reconciliation/submit`: validates counts, computes discrepancies, optionally auto-adjusts live inventory, and records reconciliation.
+  - `GET /reconciliation/history`: retrieves past reconciliation records with filters (counter, shift type, status: balanced/variance_flagged/verified, date range).
+  - `GET /reconciliation/{id}`: provides detailed line-item SKU breakdown for specific audit records.
+  - `POST /reconciliation/{id}/verify`: admin supervisor review and formal verification endpoint with remarks.
+  - `GET /reconciliation/export/csv`: generates Excel-compatible UTF-8 BOM CSV exports of shift audit logs.
+- **Counter Staff Interface (`ShiftReconciliation.jsx` at `/employee/reconciliation`)**:
+  - Date & Shift selector (`Opening Shift`, `Closing Shift`, `Full Day / Daily`).
+  - Live summary KPI cards: Expected Stock, Physical Counted, Net Variance (Balanced/Surplus/Shortage), and Discrepancy SKU counts.
+  - Quick action buttons: **"Pre-fill Expected"** (one-click match) and **"Zero All"**.
+  - Interactive table with stepper increment/decrement buttons, color-coded variance tags (`0 Match`, `+X Surplus`, `-X Shortage`), and line-item note inputs.
+  - Confirmation modal and past shift audit history breakdown.
+- **Admin Supervision & Audit Portal (`AdminReconciliation.jsx` at `/admin/reconciliations`)**:
+  - Store counter filters, shift filters, status filters, and date range filters.
+  - KPI audit metrics: Total Shift Audits, Flagged Variances, Balanced Shifts, and Admin Verified counts.
+  - Single-click CSV export button.
+  - **"Audit & Verify"** modal allowing supervisors to review SKU-level discrepancies, review staff handover remarks, and approve or flag records.
+
 ---
 
 ## 4. Key Files
+- `frontend/src/pages/ShiftReconciliation.jsx`: Counter staff shift opening and closing reconciliation worksheet with live variance detection.
+- `frontend/src/pages/AdminReconciliation.jsx`: Admin supervisor audit portal for shift reconciliation verification, history, and CSV export.
+- `backend/app/models/reconciliation.py`: SQLAlchemy models `ShiftReconciliation` and `ReconciliationItem`.
+- `backend/app/schemas/reconciliation.py`: Pydantic validation schemas for worksheets, submissions, and responses.
+- `backend/app/crud/reconciliation.py`: CRUD operations for live worksheet generation, submission, inventory sync, and audit querying.
+- `backend/app/routers/reconciliation.py`: FastAPI endpoints for worksheets, submission, verification, and CSV export.
 - `frontend/src/pages/AdminSales.jsx`: Upgraded sales dashboard with dedicated Individual Index-Wise Sales table, search, brand filters, and multi-format IST exports.
 - `frontend/src/pages/AdminDashboard.jsx`: Executive dashboard with cases/pieces toggle, brand filters, synchronized price editor modal, Current Stock column, and Low Stock (<5) filter.
 - `frontend/src/pages/EmployeeDashboard.jsx`: Representative dashboard with real-time dynamic inventory counts, piece/case converter, and red Low Stock (<5) visual alerts.
@@ -135,3 +165,4 @@ When the user says:
 - `"continue sales"`
 - or opens the session:
 Check that both backend (`http://localhost:8000`) and frontend (`http://localhost:5173`) are running, read this checkpoint, and resume immediately.
+
