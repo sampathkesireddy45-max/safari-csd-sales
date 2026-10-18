@@ -1,7 +1,7 @@
 # Safari CSD Sales & Stock Telemetry - Session Checkpoint
 
-**Last Saved Timestamp:** October 18, 2026 - 16:05 IST  
-**Conversation ID:** `b11c357f-983e-43c3-babf-c47b74644108` (resumed from `05e1d5ef-1b37-4447-b8bd-b064a8c88964`)  
+**Last Saved Timestamp:** October 18, 2026 - 21:40 IST  
+**Conversation ID:** `c5cac8be-450b-42f8-aca6-df8d20ae1aec`  
 **Workspace Path:** `C:\Users\sampa\overall sales`  
 
 ---
@@ -11,13 +11,10 @@
   - User ID / Login: `admin`
   - Password: `canteen@123`
   - Role: `admin`
-  - Assigned Base Node: `Scindia (Visakhapatnam)` (Lat: `17.688009`, Lon: `83.262097`)
-- **Staff / Employee Portal**:
-  - Employee ID: `EMP101`
-  - Name: `UPENDRA`
-  - Email: `sampathkesireddy.45@gmail.com`
-  - Password: (Configured via Admin Staff Credentials page)
-  - Assigned Retail Location: `Scindia (Visakhapatnam)` (Lat: `17.688009`, Lon: `83.262097`)
+- **Synced Staff & Store Nodes**:
+  - 10 Employees synced from live cloud: `admin`, `SAF20162` (MESALA UPENDRA RAO), `SAF19323` (YERRABILLI ARUNA), `SAF17376` (PEDADA RAJESWARA RAO), `S1414` (GOLAGANA JANAKI), `SAF19324` (NARENDRA ROY), `SAF12884` (ANIL SETHY), `SAF10343` (PITAMBER MUKHI), `SAF18993` (AJAY SETHI), `SAF8177` (SANATAN BARAL).
+  - 8 Store Locations: `INCS CANTEEN`, `NSN CANTEEN`, `NCB CANTEEN`, `202 COBRA SUNABEDA`, `TTR CANTEEN GOPALPUR`, `NCC CANTEEN CUTTACK`, `ADGM 2`, `ARC CHARBATIA`.
+  - Stock & Sales Status: Current Stock reset to 0 across all products; Sales reset to 0.
 
 ---
 
