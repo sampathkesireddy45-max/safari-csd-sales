@@ -350,7 +350,7 @@ const LiveEmployeeMapWidget = () => {
         </div>
       </div>
 
-      {/* Main Grid: Map on Left, Active Roster on Right */}
+      {/* Main Grid: Map on Left, Assigned Staff on Right */}
       <div className="grid grid-cols-1 lg:grid-cols-3">
         {/* Map View */}
         <div className="lg:col-span-2 relative min-h-[380px] bg-slate-50 border-b lg:border-b-0 lg:border-r border-slate-100">
@@ -377,7 +377,7 @@ const LiveEmployeeMapWidget = () => {
           </div>
         </div>
 
-        {/* Staff Roster Sidebar */}
+        {/* Assigned Staff Sidebar */}
         <div className="p-4 flex flex-col h-[380px] overflow-y-auto divide-y divide-slate-100">
           <div className="pb-2.5 flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">

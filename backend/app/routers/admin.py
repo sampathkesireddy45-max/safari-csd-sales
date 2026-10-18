@@ -49,10 +49,10 @@ def _sales_query(db: Session, employee_id: int = None, date_from: str = None, da
             query = query.filter(models.Sale.sale_date < datetime.fromisoformat(date_to) + timedelta(days=1))
     return query
 
-def _build_index_wise_sales(all_sales, db: Session):
+def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None):
     """
-    Computes aggregated index-wise performance for products, combining total pieces,
-    equivalent cases, revenue, and date sold.
+    Computes aggregated index-wise performance for products, combining opening stock,
+    pieces sold, closing stock, equivalent cases, revenue, and date sold.
     """
     product_sales_map = {}
     for sale in all_sales:
@@ -70,11 +70,24 @@ def _build_index_wise_sales(all_sales, db: Session):
             if sale_date_str:
                 product_sales_map[pid]["sale_dates"].add(sale_date_str)
 
+    # Current stock from live inventory
+    stock_map = {}
+    if employee_id:
+        emp = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+        if emp and emp.assigned_location_id:
+            inv_rows = db.query(models.Inventory.product_id, models.Inventory.quantity).filter(models.Inventory.location_id == emp.assigned_location_id).all()
+            stock_map = {row[0]: int(row[1] or 0) for row in inv_rows}
+    else:
+        inv_rows = db.query(models.Inventory.product_id, func.coalesce(func.sum(models.Inventory.quantity), 0)).group_by(models.Inventory.product_id).all()
+        stock_map = {row[0]: int(row[1] or 0) for row in inv_rows}
+
     products = db.query(models.Product).filter(models.Product.is_active == True).order_by(models.Product.index_no, models.Product.name).all()
     
     index_wise = []
     total_catalog_pieces = 0
     total_catalog_revenue = 0.0
+    total_opening_stock = 0
+    total_closing_stock = 0
 
     for p in products:
         sales_info = product_sales_map.get(p.id, {"pieces_sold": 0, "transactions_count": 0, "sale_dates": set()})
@@ -87,9 +100,14 @@ def _build_index_wise_sales(all_sales, db: Session):
         case_rate = round(selling_rate * case_pack, 2)
         revenue = round(pieces_sold * selling_rate, 2)
         cases_sold = round(pieces_sold / case_pack, 2)
+
+        closing_stock = stock_map.get(p.id, 0)
+        opening_stock = closing_stock + pieces_sold
         
         total_catalog_pieces += pieces_sold
         total_catalog_revenue = round(total_catalog_revenue + revenue, 2)
+        total_opening_stock += opening_stock
+        total_closing_stock += closing_stock
 
         index_wise.append({
             "product_id": p.id,
@@ -102,6 +120,8 @@ def _build_index_wise_sales(all_sales, db: Session):
             "case_pack": case_pack,
             "selling_rate": selling_rate,
             "case_rate": case_rate,
+            "opening_stock": opening_stock,
+            "closing_stock": closing_stock,
             "total_pieces_sold": pieces_sold,
             "total_cases_sold": cases_sold,
             "total_revenue": revenue,
@@ -118,6 +138,8 @@ def _build_index_wise_sales(all_sales, db: Session):
         "active_indexes_sold": sum(1 for item in index_wise if item["has_sales"]),
         "total_pieces": total_catalog_pieces,
         "total_revenue": total_catalog_revenue,
+        "total_opening_stock": total_opening_stock,
+        "total_closing_stock": total_closing_stock,
     }
 
 @router.get("/sales")
@@ -132,7 +154,7 @@ def get_admin_sales_summary(
     sales = query.order_by(models.Sale.sale_date.desc()).limit(limit).all()
     all_sales = query.all()
 
-    index_wise_sales, index_summary = _build_index_wise_sales(all_sales, db)
+    index_wise_sales, index_summary = _build_index_wise_sales(all_sales, db, employee_id=employee_id)
 
     employee_totals = db.query(
         models.Employee.id,
@@ -259,7 +281,7 @@ def export_admin_sales_index_wise_csv(
     db: Session = Depends(get_db),
 ):
     sales = _sales_query(db, employee_id, date_from, date_to).order_by(models.Sale.sale_date.desc()).all()
-    index_wise_sales, _ = _build_index_wise_sales(sales, db)
+    index_wise_sales, _ = _build_index_wise_sales(sales, db, employee_id=employee_id)
     
     output = io.StringIO(newline="")
     writer = csv.writer(output)
@@ -271,9 +293,11 @@ def export_admin_sales_index_wise_csv(
         "Category",
         "Sub Category",
         "Case Pack (Pcs)",
+        "Opening Stock (Pcs)",
+        "Volume Sold (Pcs)",
+        "Closing Stock (Pcs)",
         "Selling Rate / Pc (INR)",
         "Case Rate (INR)",
-        "Total Pieces Sold",
         "Total Cases Sold",
         "Total Revenue (INR)",
         "Date Sold",
@@ -287,9 +311,11 @@ def export_admin_sales_index_wise_csv(
             it["category"],
             it["sub_category"],
             it["case_pack"],
+            it.get("opening_stock", 0),
+            it["total_pieces_sold"],
+            it.get("closing_stock", 0),
             f"{it['selling_rate']:.2f}",
             f"{it['case_rate']:.2f}",
-            it["total_pieces_sold"],
             f"{it['total_cases_sold']:.2f}",
             f"{it['total_revenue']:.2f}",
             it.get("date_sold", ""),
@@ -311,13 +337,13 @@ def export_admin_sales_xlsx(
     db: Session = Depends(get_db),
 ):
     sales = _sales_query(db, employee_id, date_from, date_to).order_by(models.Sale.sale_date.desc()).all()
-    index_wise_sales, _ = _build_index_wise_sales(sales, db)
+    index_wise_sales, _ = _build_index_wise_sales(sales, db, employee_id=employee_id)
 
     workbook = Workbook()
 
     # ---------------- SHEET 1: Index-Wise Sales Summary ----------------
     ws_index = workbook.active
-    ws_index.title = "Index-Wise Sales Summary"
+    ws_index.title = "Sales Dashboard"
     ws_index.append([
         "Index No.",
         "Product / Model Name",
@@ -326,9 +352,11 @@ def export_admin_sales_xlsx(
         "Category",
         "Sub Category",
         "Case Pack (Pcs)",
+        "Opening Stock (Pcs)",
+        "Volume Sold (Pcs)",
+        "Closing Stock (Pcs)",
         "Selling Rate / Pc (INR)",
         "Case Rate (INR)",
-        "Total Pieces Sold",
         "Total Cases Sold",
         "Total Revenue (INR)",
         "Date Sold",
@@ -343,9 +371,11 @@ def export_admin_sales_xlsx(
             it["category"],
             it["sub_category"],
             it["case_pack"],
+            it.get("opening_stock", 0),
+            it["total_pieces_sold"],
+            it.get("closing_stock", 0),
             it["selling_rate"],
             it["case_rate"],
-            it["total_pieces_sold"],
             it["total_cases_sold"],
             it["total_revenue"],
             it.get("date_sold", ""),
@@ -355,10 +385,13 @@ def export_admin_sales_xlsx(
     ws_index.append([
         "TOTAL",
         "ALL INDEXES SUMMARY",
-        "", "", "", "", "", "", "",
+        "", "", "", "", "",
+        f"=SUM(H2:H{total_idx_row-1})",
+        f"=SUM(I2:I{total_idx_row-1})",
         f"=SUM(J2:J{total_idx_row-1})",
-        f"=SUM(K2:K{total_idx_row-1})",
-        f"=SUM(L2:L{total_idx_row-1})",
+        "", "",
+        f"=SUM(M2:M{total_idx_row-1})",
+        f"=SUM(N2:N{total_idx_row-1})",
         "",
     ])
 
@@ -368,94 +401,27 @@ def export_admin_sales_xlsx(
         cell.font = cell.font.copy(bold=True)
 
     ws_index.freeze_panes = "A2"
-    ws_index.auto_filter.ref = f"A1:M{total_idx_row-1}"
+    ws_index.auto_filter.ref = f"A1:O{total_idx_row-1}"
 
     # Number formats
-    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=8, max_col=9):
+    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=8, max_col=10):
+        row[0].number_format = '#,##0'
+        row[1].number_format = '#,##0'
+        row[2].number_format = '#,##0'
+    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=11, max_col=12):
         row[0].number_format = '#,##0.00'
         row[1].number_format = '#,##0.00'
-    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=10, max_col=10):
-        row[0].number_format = '#,##0'
-    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=11, max_col=11):
+    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=13, max_col=14):
         row[0].number_format = '#,##0.00'
-    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=12, max_col=12):
-        row[0].number_format = '#,##0.00'
+        row[1].number_format = '#,##0.00'
 
     column_widths = {
         "A": 14, "B": 32, "C": 14, "D": 14, "E": 12, "F": 16,
-        "G": 16, "H": 22, "I": 18, "J": 18, "K": 18, "L": 20, "M": 26
+        "G": 16, "H": 20, "I": 20, "J": 20, "K": 22, "L": 18,
+        "M": 18, "N": 22, "O": 26
     }
     for col, width in column_widths.items():
         ws_index.column_dimensions[col].width = width
-
-    # ---------------- SHEET 2: Sale Transactions ----------------
-    ws_sales = workbook.create_sheet(title="Sale Transactions")
-    ws_sales.append([
-        "Sale ID",
-        "Sale Date (IST)",
-        "Sale Time (IST)",
-        "Employee ID",
-        "Employee",
-        "Location",
-        "Index & Items Breakdown",
-        "Total Pieces",
-        "Total Cost (INR)",
-        "Line Items Count",
-    ])
-
-    for sale in sales:
-        ist_dt = to_ist(sale.sale_date)
-        items_breakdown = ", ".join(
-            f"{it.product.index_no or ''} {it.product.name if it.product else 'Product'} ({it.quantity} pcs)"
-            for it in sale.items
-        )
-        ws_sales.append([
-            sale.id,
-            format_ist_date(sale.sale_date),
-            format_ist_time(sale.sale_date),
-            sale.employee.employee_id if sale.employee else "",
-            sale.employee.name if sale.employee else "Unknown",
-            sale.location.name if sale.location else "Unknown",
-            items_breakdown,
-            sale.total_pieces or 0,
-            _sale_cost(sale),
-            len(sale.items),
-        ])
-
-    total_sales_row = len(sales) + 2
-    if len(sales) > 0:
-        ws_sales.append([
-            "TOTAL",
-            "", "", "", "", "", "TOTAL TRANSACTIONS",
-            f"=SUM(H2:H{total_sales_row-1})",
-            f"=SUM(I2:I{total_sales_row-1})",
-            f"=SUM(J2:J{total_sales_row-1})",
-        ])
-        for cell in ws_sales[total_sales_row]:
-            cell.font = cell.font.copy(bold=True)
-
-    for cell in ws_sales[1]:
-        cell.font = cell.font.copy(bold=True)
-
-    ws_sales.freeze_panes = "A2"
-    if len(sales) > 0:
-        ws_sales.auto_filter.ref = f"A1:J{total_sales_row-1}"
-
-    ws_sales.column_dimensions["A"].width = 12
-    ws_sales.column_dimensions["B"].width = 16
-    ws_sales.column_dimensions["C"].width = 16
-    ws_sales.column_dimensions["D"].width = 14
-    ws_sales.column_dimensions["E"].width = 22
-    ws_sales.column_dimensions["F"].width = 20
-    ws_sales.column_dimensions["G"].width = 40
-    ws_sales.column_dimensions["H"].width = 14
-    ws_sales.column_dimensions["I"].width = 18
-    ws_sales.column_dimensions["J"].width = 16
-
-    for row in ws_sales.iter_rows(min_row=2, max_row=total_sales_row, min_col=8, max_col=8):
-        row[0].number_format = '#,##0'
-    for row in ws_sales.iter_rows(min_row=2, max_row=total_sales_row, min_col=9, max_col=9):
-        row[0].number_format = '#,##0.00'
 
     output = io.BytesIO()
     workbook.save(output)

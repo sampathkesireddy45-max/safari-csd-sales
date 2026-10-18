@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -14,14 +14,20 @@ import {
   UserCheck,
   Building2,
   Navigation,
-  Key, BarChart3, Activity, ShoppingCart, Scale
+  Key, BarChart3, Activity, ShoppingCart
 } from "lucide-react";
 
 const Sidebar = () => {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, refreshUser } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    if (refreshUser) {
+      refreshUser();
+    }
+  }, []);
 
   const adminLinks = [
     { label: "Overview", path: "/admin/dashboard", icon: LayoutDashboard },
@@ -32,15 +38,14 @@ const Sidebar = () => {
     { label: "Employee Directory", path: "/admin/employees", icon: Users },
     { label: "Reports & Analytics", path: "/admin/reports", icon: BarChart3 },
     { label: "Sales Dashboard", path: "/admin/sales", icon: ShoppingCart },
-    { label: "Stock Reconciliations", path: "/admin/reconciliations", icon: Scale },
     { label: "System Health", path: "/admin/system-health", icon: Activity },
   ];
 
   const employeeLinks = [
     { label: "My Dashboard", path: "/employee/dashboard", icon: LayoutDashboard },
-    { label: "Shift Reconciliation", path: "/employee/reconciliation", icon: Scale },
-    { label: "Report Damage & Photo", path: "/employee/damages", icon: AlertOctagon },
+    { label: "My Sales & Stock", path: "/employee/sales-dashboard", icon: BarChart3 },
     { label: "Sales Entry", path: "/employee/sales-entry", icon: ShoppingBag },
+    { label: "Report Damage & Photo", path: "/employee/damages", icon: AlertOctagon },
   ];
 
 
@@ -108,7 +113,7 @@ const Sidebar = () => {
       {user && (
         <div className="p-4 border-t border-slate-800/80 bg-slate-950/40">
           <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-slate-800/40 border border-slate-800">
-            <div className="w-9 h-9 rounded-full bg-indigo-900/60 border border-indigo-700/50 flex items-center justify-center text-indigo-300 font-semibold text-sm">
+            <div className="w-9 h-9 rounded-full bg-indigo-900/60 border border-indigo-700/50 flex items-center justify-center text-indigo-300 font-semibold text-sm shrink-0">
               {isAdmin ? <ShieldCheck className="w-4 h-4 text-amber-400" /> : <UserCheck className="w-4 h-4 text-emerald-400" />}
             </div>
             <div className="flex-1 min-w-0">
@@ -118,10 +123,18 @@ const Sidebar = () => {
               <p className="text-[11px] text-slate-400 truncate">
                 {user.email}
               </p>
+              {!isAdmin && (
+                <div className="flex items-center gap-1 mt-0.5 text-[10px] truncate text-indigo-400 font-medium">
+                  <Building2 className="w-3 h-3 shrink-0" />
+                  <span className="truncate">
+                    {user.assigned_location_name || (user.assigned_location_id ? `Store #${user.assigned_location_id}` : "Unassigned Store")}
+                  </span>
+                </div>
+              )}
             </div>
             <button
               onClick={handleLogout}
-              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors"
+              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors shrink-0"
               title="Sign out"
               aria-label="Sign out"
             >

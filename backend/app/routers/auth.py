@@ -23,6 +23,7 @@ class UserResponse(BaseModel):
     role: str
     status: str
     assigned_location_id: int | None = None
+    assigned_location_name: str | None = None
 
     class Config:
         from_attributes = True

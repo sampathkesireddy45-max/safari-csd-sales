@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import {
   exportAdminSalesXlsx,
-  exportAdminSalesCsv,
   exportAdminSalesIndexWiseCsv,
   getAdminSalesSummary,
   getEmployees,
@@ -42,7 +41,6 @@ const AdminSales = () => {
   });
   const [employees, setEmployees] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState("");
-  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -134,24 +132,6 @@ const AdminSales = () => {
     }
   };
 
-  const handleExportTxCsv = async () => {
-    setExporting("tx_csv");
-    try {
-      const blob = await exportAdminSalesCsv(selectedEmployee);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `sales_transactions_${new Date().toISOString().slice(0, 10)}.csv`;
-      link.click();
-      URL.revokeObjectURL(url);
-      addToast("Transactions CSV downloaded!", "success");
-    } catch (error) {
-      addToast(error.message || "CSV Export failed", "error");
-    } finally {
-      setExporting("");
-    }
-  };
-
   // Filter and sort for Index-wise sales
   const filteredIndexSales = useMemo(() => {
     let list = summary.index_wise_sales || [];
@@ -199,6 +179,8 @@ const AdminSales = () => {
   const indexViewTotals = useMemo(() => {
     return filteredIndexSales.reduce(
       (acc, item) => {
+        acc.opening += item.opening_stock || 0;
+        acc.closing += item.closing_stock || 0;
         acc.pieces += item.total_pieces_sold;
         acc.cases += item.total_cases_sold;
         acc.revenue += item.total_revenue;
@@ -206,22 +188,14 @@ const AdminSales = () => {
         if (item.total_pieces_sold > 0) acc.activeCount += 1;
         return acc;
       },
-      { pieces: 0, cases: 0, revenue: 0, transactions: 0, activeCount: 0 }
+      { opening: 0, closing: 0, pieces: 0, cases: 0, revenue: 0, transactions: 0, activeCount: 0 }
     );
   }, [filteredIndexSales]);
-
-  const filteredSales = (summary.sales || []).filter((sale) => {
-    const term = search.trim().toLowerCase();
-    if (!term) return true;
-    return [sale.employee_name, sale.location_name, String(sale.id)].some((value) =>
-      value?.toLowerCase().includes(term)
-    );
-  });
 
   return (
     <Layout
       title="Sales Dashboard"
-      subtitle="Analyze index-wise SKU performance, retail volume, and employee transactions"
+      subtitle="Analyze catalog index-wise SKU performance, opening/closing stock, and sales volume"
       action={
         <div className="flex flex-wrap gap-2">
           <button
@@ -237,38 +211,22 @@ const AdminSales = () => {
             onClick={() => handleExportXlsx("", "Overall")}
             disabled={exporting.startsWith("xlsx")}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-60 transition shadow-sm"
-            title="Download multi-sheet Excel with Index-Wise Summary + Sale Transactions in correct IST"
+            title="Download Excel report with Opening Stock, Volume Sold, Closing Stock, and Revenue"
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
-            {exporting === "xlsx_Overall" ? "Exporting..." : "Export Excel (Multi-Sheet)"}
+            {exporting === "xlsx_Overall" ? "Exporting..." : "Export Excel (XLSX)"}
           </button>
 
-          <div className="relative group inline-block">
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 transition shadow-sm"
-            >
-              <Download className="w-3.5 h-3.5 text-slate-500" /> Export CSV ▾
-            </button>
-            <div className="absolute right-0 mt-1 hidden group-hover:block w-48 bg-white border border-slate-200 rounded-xl shadow-lg z-20 py-1">
-              <button
-                type="button"
-                onClick={handleExportIndexCsv}
-                disabled={exporting === "index_csv"}
-                className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 font-medium flex items-center gap-2"
-              >
-                <Tag className="w-3.5 h-3.5 text-indigo-500" /> Index-Wise CSV
-              </button>
-              <button
-                type="button"
-                onClick={handleExportTxCsv}
-                disabled={exporting === "tx_csv"}
-                className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 font-medium flex items-center gap-2"
-              >
-                <FileText className="w-3.5 h-3.5 text-emerald-500" /> Transactions CSV (IST)
-              </button>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={handleExportIndexCsv}
+            disabled={exporting === "index_csv"}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 transition shadow-sm"
+            title="Export Index-Wise sales CSV"
+          >
+            <Download className="w-3.5 h-3.5 text-slate-500" />
+            {exporting === "index_csv" ? "Exporting..." : "Export CSV"}
+          </button>
 
           {selectedEmployee && (
             <button
@@ -351,11 +309,29 @@ const AdminSales = () => {
         </div>
 
         {/* Top Metric Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">
+                Opening Stock
+              </span>
+              <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-sm">
+                <Boxes className="w-4 h-4" />
+              </div>
+            </div>
+            <p className="mt-3 text-3xl font-black text-amber-950">
+              {(summary.index_summary?.total_opening_stock ?? indexViewTotals.opening).toLocaleString("en-IN")}{" "}
+              <span className="text-xs font-bold text-amber-600">PCS</span>
+            </p>
+            <p className="mt-1 text-xs text-amber-700">
+              Start of period catalog stock
+            </p>
+          </div>
+
           <div className="rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">
-                {selectedEmployee ? "Selected Staff Volume" : "Total Volume Sold"}
+                {selectedEmployee ? "Selected Staff Volume" : "Volume Sold"}
               </span>
               <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center">
                 <ShoppingBag className="w-4 h-4" />
@@ -366,61 +342,62 @@ const AdminSales = () => {
               <span className="text-xs font-bold text-indigo-600">PCS</span>
             </p>
             <p className="mt-1 text-xs text-indigo-700">
-              {(summary.overall?.sale_count || 0).toLocaleString("en-IN")} transactions recorded
+              {(summary.overall?.sale_count || 0).toLocaleString("en-IN")} retail sales
             </p>
           </div>
 
-          <div className="rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50 to-white p-5 shadow-sm">
+          <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-5 shadow-sm">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">
-                Total Revenue
+              <span className="text-[11px] font-bold uppercase tracking-wider text-violet-700">
+                Closing Stock
               </span>
-              <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-sm">
-                ₹
+              <div className="w-8 h-8 rounded-lg bg-violet-100 text-violet-700 flex items-center justify-center font-bold text-sm">
+                <PackageCheck className="w-4 h-4" />
               </div>
             </div>
-            <p className="mt-3 text-3xl font-black text-amber-950">
-              ₹{Number(summary.overall?.total_cost || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+            <p className="mt-3 text-3xl font-black text-violet-950">
+              {(summary.index_summary?.total_closing_stock ?? indexViewTotals.closing).toLocaleString("en-IN")}{" "}
+              <span className="text-xs font-bold text-violet-600">PCS</span>
             </p>
-            <p className="mt-1 text-xs text-amber-700">
-              CSD Canteen Selling Value
+            <p className="mt-1 text-xs text-violet-700">
+              Current store counter balance
             </p>
           </div>
 
           <div className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
-                Index SKU's Active
+                Total Revenue
               </span>
-              <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center">
-                <Tag className="w-4 h-4" />
+              <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-sm">
+                ₹
               </div>
             </div>
             <p className="mt-3 text-3xl font-black text-emerald-950">
-              {summary.index_summary?.active_indexes_sold || 0}{" "}
-              <span className="text-xs font-semibold text-emerald-600">
-                / {summary.index_summary?.total_indexes || 100} SKU's
-              </span>
+              ₹{Number(summary.overall?.total_cost || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
             </p>
             <p className="mt-1 text-xs text-emerald-700">
-              Distinct catalog index numbers sold
+              CSD Canteen Selling Value
             </p>
           </div>
 
           <div className="rounded-2xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-wider text-sky-700">
-                Active Staff Counter
+                Index SKU's Active
               </span>
               <div className="w-8 h-8 rounded-lg bg-sky-100 text-sky-600 flex items-center justify-center">
-                <Users className="w-4 h-4" />
+                <Tag className="w-4 h-4" />
               </div>
             </div>
             <p className="mt-3 text-3xl font-black text-sky-950">
-              {summary.employees?.length || 0}
+              {summary.index_summary?.active_indexes_sold || 0}{" "}
+              <span className="text-xs font-semibold text-sky-600">
+                / {summary.index_summary?.total_indexes || 100}
+              </span>
             </p>
             <p className="mt-1 text-xs text-sky-700">
-              Employees with sales entries
+              Distinct catalog index numbers sold
             </p>
           </div>
         </div>
@@ -553,9 +530,13 @@ const AdminSales = () => {
 
           {/* Quick Stats Pill Header */}
           <div className="px-5 py-2.5 bg-indigo-50/50 border-b border-indigo-100 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-4 text-slate-600">
+            <div className="flex items-center gap-3 text-slate-600 flex-wrap">
               <span>
                 Showing <strong className="text-slate-900 font-bold">{filteredIndexSales.length}</strong> Index SKU's
+              </span>
+              <span>·</span>
+              <span>
+                Opening: <strong className="text-amber-700 font-black">{indexViewTotals.opening} PCS</strong>
               </span>
               <span>·</span>
               <span>
@@ -565,6 +546,10 @@ const AdminSales = () => {
                     (≈ {indexViewTotals.cases} Cases)
                   </span>
                 )}
+              </span>
+              <span>·</span>
+              <span>
+                Closing: <strong className="text-violet-700 font-black">{indexViewTotals.closing} PCS</strong>
               </span>
               <span>·</span>
               <span>
@@ -598,9 +583,11 @@ const AdminSales = () => {
                     <th className="px-3 py-3">Brand</th>
                     <th className="px-3 py-3">Colour / Cat</th>
                     <th className="px-3 py-3 text-right">Case Pack</th>
+                    <th className="px-4 py-3 text-right font-black text-amber-700">Opening Stock</th>
+                    <th className="px-4 py-3 text-right font-black text-indigo-700">Volume Sold</th>
+                    <th className="px-4 py-3 text-right font-black text-violet-700">Closing Stock</th>
                     <th className="px-4 py-3 text-right">Selling Price (PC)</th>
                     <th className="px-4 py-3 text-right">Case Price</th>
-                    <th className="px-4 py-3 text-right font-black text-indigo-700">Volume Sold</th>
                     <th className="px-4 py-3 text-right font-black text-emerald-700">Total Revenue</th>
                     <th className="px-4 py-3 text-center">Date Sold</th>
                   </tr>
@@ -668,14 +655,18 @@ const AdminSales = () => {
                           {item.case_pack} pcs
                         </td>
 
-                        {/* Selling Price / PC */}
-                        <td className="px-4 py-3 text-right whitespace-nowrap font-bold text-slate-900">
-                          ₹{Number(item.selling_rate || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                        </td>
-
-                        {/* Case Price */}
-                        <td className="px-4 py-3 text-right whitespace-nowrap text-slate-600">
-                          ₹{Number(item.case_rate || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        {/* Opening Stock */}
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <span className="inline-block px-2 py-0.5 rounded-lg bg-amber-50 text-amber-900 font-bold text-xs border border-amber-200">
+                            {viewUnit === "cases"
+                              ? `${((item.opening_stock || 0) / (item.case_pack || 1)).toFixed(1)} Cases`
+                              : `${item.opening_stock || 0} PCS`}
+                          </span>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {viewUnit === "cases"
+                              ? `${item.opening_stock || 0} PCS`
+                              : `${((item.opening_stock || 0) / (item.case_pack || 1)).toFixed(1)} Cases`}
+                          </div>
                         </td>
 
                         {/* Volume Sold */}
@@ -694,8 +685,38 @@ const AdminSales = () => {
                               </div>
                             </div>
                           ) : (
-                            <span className="text-slate-300">0</span>
+                            <span className="text-slate-300 font-bold">0</span>
                           )}
+                        </td>
+
+                        {/* Closing Stock */}
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded-lg font-bold text-xs border ${
+                              (item.closing_stock || 0) < 5
+                                ? "bg-rose-50 text-rose-800 border-rose-300 font-black"
+                                : "bg-slate-100 text-slate-800 border-slate-200"
+                            }`}
+                          >
+                            {viewUnit === "cases"
+                              ? `${((item.closing_stock || 0) / (item.case_pack || 1)).toFixed(1)} Cases`
+                              : `${item.closing_stock || 0} PCS`}
+                          </span>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {viewUnit === "cases"
+                              ? `${item.closing_stock || 0} PCS`
+                              : `${((item.closing_stock || 0) / (item.case_pack || 1)).toFixed(1)} Cases`}
+                          </div>
+                        </td>
+
+                        {/* Selling Price / PC */}
+                        <td className="px-4 py-3 text-right whitespace-nowrap font-bold text-slate-900">
+                          ₹{Number(item.selling_rate || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        </td>
+
+                        {/* Case Price */}
+                        <td className="px-4 py-3 text-right whitespace-nowrap text-slate-600">
+                          ₹{Number(item.case_rate || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                         </td>
 
                         {/* Total Revenue */}
@@ -721,13 +742,26 @@ const AdminSales = () => {
                 {/* Table Footer / Summary Row */}
                 <tfoot className="bg-slate-100 border-t-2 border-slate-300 font-bold text-slate-900 text-xs">
                   <tr>
-                    <td colSpan={7} className="px-4 py-3 text-right uppercase tracking-wider text-slate-700">
+                    <td colSpan={5} className="px-4 py-3 text-right uppercase tracking-wider text-slate-700">
                       Index Total ({filteredIndexSales.length} SKU's):
+                    </td>
+                    <td className="px-4 py-3 text-right font-black text-amber-900 whitespace-nowrap">
+                      {viewUnit === "cases"
+                        ? `${(indexViewTotals.opening / (indexViewTotals.cases || 1)).toFixed(1)} Cases`
+                        : `${indexViewTotals.opening} PCS`}
                     </td>
                     <td className="px-4 py-3 text-right font-black text-indigo-900 whitespace-nowrap">
                       {viewUnit === "cases"
                         ? `${indexViewTotals.cases} Cases`
                         : `${indexViewTotals.pieces} PCS`}
+                    </td>
+                    <td className="px-4 py-3 text-right font-black text-violet-900 whitespace-nowrap">
+                      {viewUnit === "cases"
+                        ? `${(indexViewTotals.closing / (indexViewTotals.cases || 1)).toFixed(1)} Cases`
+                        : `${indexViewTotals.closing} PCS`}
+                    </td>
+                    <td colSpan={2} className="px-4 py-3 text-center text-slate-400 font-normal">
+                      —
                     </td>
                     <td className="px-4 py-3 text-right font-black text-emerald-800 whitespace-nowrap">
                       ₹{indexViewTotals.revenue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
@@ -798,92 +832,6 @@ const AdminSales = () => {
               </p>
             )}
           </div>
-        </div>
-
-        {/* ---------------- SALE TRANSACTIONS SECTION ---------------- */}
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                <FileSpreadsheet className="w-5 h-5" />
-              </div>
-              <div>
-                <h2 className="font-bold text-slate-900">Sale Transactions (IST Log)</h2>
-                <p className="text-xs text-slate-500">
-                  Showing {filteredSales.length} recorded retail transactions with exact Indian Standard Time
-                </p>
-              </div>
-            </div>
-            <div className="relative w-full sm:w-auto">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search transaction, staff, or location..."
-                className="w-full sm:w-64 pl-9 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs"
-              />
-            </div>
-          </div>
-          {loading ? (
-            <p className="p-10 text-center text-sm text-slate-400">Loading transactions...</p>
-          ) : filteredSales.length === 0 ? (
-            <p className="p-10 text-center text-sm text-slate-400">No transactions entered yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-[10px] uppercase text-slate-500 font-bold border-b border-slate-100">
-                  <tr>
-                    <th className="px-5 py-3">Sale ID</th>
-                    <th>IST Date & Time</th>
-                    <th>Employee</th>
-                    <th>Location</th>
-                    <th>Items Sold (Index & SKU)</th>
-                    <th>Total Value</th>
-                    <th className="text-right px-5">Total Pieces</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredSales.map((sale) => (
-                    <tr key={sale.id} className="hover:bg-slate-50/60">
-                      <td className="px-5 py-3 font-mono font-bold text-indigo-600">#{sale.id}</td>
-                      <td>
-                        <div className="font-medium text-slate-800">
-                          {sale.formatted_date || (sale.sale_date ? new Date(sale.sale_date).toLocaleDateString() : "—")}
-                        </div>
-                        <div className="text-[10px] text-slate-400">
-                          {sale.formatted_time || (sale.sale_date ? new Date(sale.sale_date).toLocaleTimeString() : "")}
-                        </div>
-                      </td>
-                      <td className="font-medium text-slate-800">{sale.employee_name}</td>
-                      <td className="text-slate-600">{sale.location_name}</td>
-                      <td>
-                        {sale.items && sale.items.length > 0 ? (
-                          <div className="flex flex-wrap gap-1 max-w-md">
-                            {sale.items.map((it, idx) => (
-                              <span
-                                key={idx}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[11px]"
-                              >
-                                <strong className="font-mono text-indigo-600">{it.index_no}</strong>: {it.quantity} pcs
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="text-slate-500">{sale.item_count} items</span>
-                        )}
-                      </td>
-                      <td className="font-bold text-emerald-700">
-                        ₹{Number(sale.total_cost || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="text-right px-5 font-black text-indigo-900">
-                        {sale.total_pieces} PCS
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       </div>
     </Layout>

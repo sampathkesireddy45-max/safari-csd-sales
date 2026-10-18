@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import { getProducts, getInventories, createSale } from "../services/api";
 import { useNavigate } from "react-router-dom";
@@ -15,11 +15,13 @@ import {
   AlertTriangle,
   Receipt,
   Search,
-  Tag
+  Tag,
+  PackageCheck,
+  Building2,
 } from "lucide-react";
 
 const SalesEntry = () => {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { addToast } = useToast();
   const navigate = useNavigate();
 
@@ -29,10 +31,29 @@ const SalesEntry = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  // Sync products with live location inventories
+  const productsWithLiveStock = useMemo(() => {
+    const invMap = {};
+    inventories.forEach((inv) => {
+      invMap[String(inv.product_id)] = inv.quantity;
+    });
+    return products.map((prod) => {
+      const liveQty = invMap[String(prod.id)];
+      return {
+        ...prod,
+        total_stock: liveQty !== undefined ? liveQty : (prod.total_stock ?? 0),
+      };
+    });
+  }, [products, inventories]);
+
   useEffect(() => {
     if (!user) {
       navigate("/login", { replace: true });
       return;
+    }
+
+    if (refreshUser) {
+      refreshUser();
     }
 
     const loadData = async () => {
@@ -93,7 +114,7 @@ const SalesEntry = () => {
     if (!productId) return null;
     const inv = inventories.find((i) => String(i.product_id) === String(productId));
     if (inv) return inv.quantity;
-    const prod = getProduct(productId);
+    const prod = products.find((p) => String(p.id) === String(productId));
     return prod?.total_stock ?? 0;
   };
 
@@ -138,6 +159,11 @@ const SalesEntry = () => {
       return;
     }
 
+    if (!user?.assigned_location_id) {
+      addToast("You do not have an assigned retail store. Please ask an administrator to assign your store in the Admin Portal.", "error");
+      return;
+    }
+
     setSubmitting(true);
 
     const saleData = {
@@ -156,9 +182,13 @@ const SalesEntry = () => {
         "success"
       );
       setSaleItems([{ productId: "", quantity: "", unit: "pieces" }]);
-      // Refresh inventory
-      const updatedInv = await getInventories();
+      // Refresh both inventories and products so live stock display updates immediately
+      const [updatedInv, updatedProd] = await Promise.all([
+        getInventories(),
+        getProducts(),
+      ]);
       setInventories(updatedInv || []);
+      setProducts(updatedProd || []);
     } catch (err) {
       console.error("Failed to create sale:", err);
       addToast(err.message || "Failed to record sale. Please try again.", "error");
@@ -204,6 +234,38 @@ const SalesEntry = () => {
             </div>
           </div>
 
+          {/* Active Operating Store Location Banner */}
+          <div className={`p-4 rounded-2xl border flex items-center justify-between gap-4 mb-6 ${
+            user?.assigned_location_id
+              ? "bg-indigo-50/70 border-indigo-200/80 text-indigo-950"
+              : "bg-amber-50 border-amber-200 text-amber-900"
+          }`}>
+            <div className="flex items-center gap-3">
+              <div className={`p-2.5 rounded-xl ${user?.assigned_location_id ? "bg-indigo-600 text-white shadow-sm" : "bg-amber-500 text-white"}`}>
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  Operating Store Location
+                </span>
+                <span className="block text-sm font-bold text-slate-900">
+                  {user?.assigned_location_name || (user?.assigned_location_id ? `Store #${user.assigned_location_id}` : "No Store Assigned")}
+                </span>
+              </div>
+            </div>
+            {user?.assigned_location_id ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Store Connected</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-200 text-amber-900">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>Contact Admin to Assign Store</span>
+              </span>
+            )}
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-4">
               {saleItems.map((item, index) => {
@@ -238,25 +300,46 @@ const SalesEntry = () => {
                           Product (Search by Index No. or Name)
                         </label>
                         <ProductSearchSelect
-                          products={products}
+                          products={productsWithLiveStock}
                           selectedProductId={item.productId}
                           onSelectProduct={(p) => handleProductChange(index, p ? p.id : "")}
                           placeholder="Type Index No. (e.g. 36812) or item name..."
                           required={true}
                         />
 
-                        {/* Low Stock Warning Alert */}
-                        {item.productId && getProductStock(item.productId) !== null && getProductStock(item.productId) < 5 && (
-                          <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between text-xs text-red-700">
+                        {/* Live Available Store Stock Badge */}
+                        {item.productId && getProductStock(item.productId) !== null && (
+                          <div className="mt-2 p-2 bg-slate-100/90 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
                             <div className="flex items-center gap-1.5">
-                              <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
-                              <span className="font-medium">
-                                <strong className="font-bold">Low Stock Alert:</strong> {getProductStock(item.productId) === 0 ? "Out of Stock (0 PCS)" : `Only ${getProductStock(item.productId)} pcs in stock (<5)`}
+                              <PackageCheck className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                              <span className="font-semibold text-slate-700">
+                                Current Counter Stock:
                               </span>
                             </div>
-                            <span className="font-mono font-bold text-red-800 bg-red-100 px-2 py-0.5 rounded text-[10px]">
-                              {getProductStock(item.productId)} PCS
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`font-mono font-bold px-2 py-0.5 rounded text-[11px] ${
+                                  getProductStock(item.productId) === 0
+                                    ? "bg-red-100 text-red-800 border border-red-300"
+                                    : getProductStock(item.productId) < 5
+                                    ? "bg-amber-100 text-amber-800 border border-amber-300"
+                                    : "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                }`}
+                              >
+                                {getProductStock(item.productId)} PCS
+                                {getProduct(item.productId)?.case_pack > 1 && (
+                                  <span className="ml-1 opacity-80 font-normal">
+                                    (≈ {Math.floor(getProductStock(item.productId) / getProduct(item.productId).case_pack)} cases)
+                                  </span>
+                                )}
+                              </span>
+                              {getProductStock(item.productId) === 0 && (
+                                <span className="text-[10px] font-bold text-red-600 uppercase">Out of Stock</span>
+                              )}
+                              {getProductStock(item.productId) > 0 && getProductStock(item.productId) < 5 && (
+                                <span className="text-[10px] font-bold text-amber-600 uppercase">Low Stock</span>
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>

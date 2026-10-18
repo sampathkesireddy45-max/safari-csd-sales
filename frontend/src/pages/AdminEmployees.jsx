@@ -147,7 +147,7 @@ const AdminEmployees = () => {
 
   return (
     <Layout
-      title="Staff Directory & Roster"
+      title="Staff Directory & Assigned Staff"
       subtitle="Manage corporate credentials, store allocations, and system roles"
       action={
         <button

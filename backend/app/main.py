@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from .routers import auth, location, employee, product, inventory, sale, damage_report, admin, reconciliation
+from .routers import auth, location, employee, product, inventory, sale, damage_report, admin
 
 app = FastAPI(title="Safari Sales & Stock Management System")
 
@@ -33,7 +33,7 @@ app.include_router(inventory.router)
 app.include_router(sale.router)
 app.include_router(damage_report.router)
 app.include_router(admin.router)
-app.include_router(reconciliation.router)
+
 
 
 from .utils.database import Base, engine, SessionLocal

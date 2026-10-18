@@ -24,11 +24,12 @@ import {
   PackagePlus,
   Search,
   Edit3,
-  PackageCheck
+  PackageCheck,
+  BarChart3,
 } from "lucide-react";
 
 const EmployeeDashboard = () => {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [stats, setStats] = useState({
     assignedLocation: "Not assigned",
     assignedLocationId: null,
@@ -88,6 +89,9 @@ const EmployeeDashboard = () => {
 
   const fetchStats = async () => {
     try {
+      if (refreshUser) {
+        refreshUser();
+      }
       const [statsData, prodsData] = await Promise.all([
         getEmployeeDashboardStats(user.id),
         getProducts(),
@@ -248,6 +252,30 @@ const EmployeeDashboard = () => {
                 <span className="text-xs text-rose-500 font-medium">PCS total</span>
               </div>
             </div>
+          </div>
+
+          {/* Quick Access Banner to Employee Sales & Stock Dashboard */}
+          <div className="bg-gradient-to-r from-indigo-900 via-slate-900 to-indigo-950 rounded-2xl p-5 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md border border-indigo-800/80">
+            <div className="flex items-center gap-3.5">
+              <div className="p-3 bg-indigo-600/80 rounded-xl text-white shadow-inner">
+                <BarChart3 className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-white">
+                  My Sales Counter & Stock Dashboard
+                </h3>
+                <p className="text-xs text-indigo-200">
+                  Track individual sales, opening & closing store stock, low stock (&lt;5) & overflow (&gt;10), and adjust opening stock
+                </p>
+              </div>
+            </div>
+            <Link
+              to="/employee/sales-dashboard"
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow transition self-start sm:self-auto shrink-0"
+            >
+              <span>Open Sales Dashboard</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
           </div>
 
           {/* Current Stock Inventory at Assigned Node with Dynamic Piece Entry */}

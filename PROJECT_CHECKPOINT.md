@@ -1,7 +1,7 @@
 # Safari CSD Sales & Stock Telemetry - Session Checkpoint
 
-**Last Saved Timestamp:** October 18, 2026 - 14:55 IST  
-**Conversation ID:** `c770b319-1fa5-47ba-95cf-7457f78d8586` (resumed from `beac8206-6b50-4249-ba27-4d0476831be3`)  
+**Last Saved Timestamp:** October 18, 2026 - 16:05 IST  
+**Conversation ID:** `b11c357f-983e-43c3-babf-c47b74644108` (resumed from `05e1d5ef-1b37-4447-b8bd-b064a8c88964`)  
 **Workspace Path:** `C:\Users\sampa\overall sales`  
 
 ---
@@ -137,32 +137,50 @@
   - Single-click CSV export button.
   - **"Audit & Verify"** modal allowing supervisors to review SKU-level discrepancies, review staff handover remarks, and approve or flag records.
 
+### F. Sales Dashboard Streamlining, Terminology & Live Counter Stock
+- **Sales Transactions Removed**: Removed the Sale Transactions table and dedicated transaction exports from the Sales Dashboard (`AdminSales.jsx`), leaving a clean, high-performance Index-Wise sales register.
+- **"Rostered" Replaced with "Assigned"**: Completely replaced all instances of "rostered" with "assigned" across GPS tracking tables, attendance sidebars, and staff directories.
+- **Opening & Closing Stock in Sales Dashboard**:
+  - Added dedicated **Opening Stock** and **Closing Stock** columns to the Sales Dashboard table and exports (both CSV and multi-sheet XLSX).
+  - Formulas dynamically compute `Opening Stock = Closing Stock + Volume Sold`, maintaining strict retail accounting accuracy.
+- **Live Counter Stock Display in Employee Sales Entry**:
+  - `SalesEntry.jsx` now reactively merges catalog products with the employee's assigned store location inventory.
+  - An available store stock badge is displayed for every selected line item.
+  - Submitting sales triggers an immediate dual-refresh of both inventory and catalog data so counter stock decrements in real time without a manual page reload.
+- **Reconciliations Removed**: Shift and store reconciliations have been completely eliminated from the frontend routing, sidebar navigation, and backend router registry.
+
+### G. Store Assignment Synchronization & Employee Sales & Stock Dashboard
+- **Admin Store Assignment Instant Sync**:
+  - `UserResponse` schema in `backend/app/routers/auth.py` now includes `assigned_location_name`.
+  - Added `refreshUser` helper in `AuthContext.jsx` and mounted automatic refresh on `Sidebar.jsx`, `SalesEntry.jsx`, `EmployeeDashboard.jsx`, and `EmployeeSalesDashboard.jsx`.
+  - Whenever an admin reassigns an employee's store counter in the Admin Portal (`/admin/employees` or `/admin/locations`), the employee's assigned store name and counter details update dynamically in the employee portal.
+  - Added assigned store outlet badge and counter validation to `SalesEntry.jsx` and `Sidebar.jsx`.
+- **Employee Sales & Stock Dashboard (`/employee/sales-dashboard`)**:
+  - Added dedicated page `EmployeeSalesDashboard.jsx` accessible from `Sidebar.jsx` ("My Sales & Stock") and the staff dashboard banner.
+  - Displays individual sales volume, individual revenue, total opening stock, total closing stock, low stock (<5 PCS), out of stock (0 PCS), and overflow stock (>10 PCS).
+  - Index-wise catalog stock table displaying Index No, Name, Brand, Selling Price, My Sold Pieces, Opening Stock, Closing Stock, and Stock Status.
+  - **Editable Opening Stock**: Staff can edit **Opening Stock only** via an inline modal. Validates that opening stock cannot be less than volume already sold in the period. Closing stock is automatically recalculated (`Closing = Opening - Sold`), updating the live store inventory and writing an `opening_stock_adjustment` transaction audit log.
+  - **Sales History Tab**: Lists individual counter sales receipts with IST timestamps, total amounts, and SKU breakdown.
+
 ---
 
 ## 4. Key Files
-- `frontend/src/pages/ShiftReconciliation.jsx`: Counter staff shift opening and closing reconciliation worksheet with live variance detection.
-- `frontend/src/pages/AdminReconciliation.jsx`: Admin supervisor audit portal for shift reconciliation verification, history, and CSV export.
-- `backend/app/models/reconciliation.py`: SQLAlchemy models `ShiftReconciliation` and `ReconciliationItem`.
-- `backend/app/schemas/reconciliation.py`: Pydantic validation schemas for worksheets, submissions, and responses.
-- `backend/app/crud/reconciliation.py`: CRUD operations for live worksheet generation, submission, inventory sync, and audit querying.
-- `backend/app/routers/reconciliation.py`: FastAPI endpoints for worksheets, submission, verification, and CSV export.
-- `frontend/src/pages/AdminSales.jsx`: Upgraded sales dashboard with dedicated Individual Index-Wise Sales table, search, brand filters, and multi-format IST exports.
-- `frontend/src/pages/AdminDashboard.jsx`: Executive dashboard with cases/pieces toggle, brand filters, synchronized price editor modal, Current Stock column, and Low Stock (<5) filter.
-- `frontend/src/pages/EmployeeDashboard.jsx`: Representative dashboard with real-time dynamic inventory counts, piece/case converter, and red Low Stock (<5) visual alerts.
-- `frontend/src/pages/SalesEntry.jsx`: Sales counter with real-time stock availability verification and low-stock warning banners.
-- `frontend/src/components/ProductSearchSelect.jsx`: Product lookup autocomplete with live stock level indicators and low stock badges.
-- `backend/app/models/product.py`: Product model with dynamic `total_stock` inventory calculation property.
-- `backend/app/schemas/product.py`: Product Pydantic schemas serializing `total_stock`.
+- `frontend/src/pages/EmployeeSalesDashboard.jsx`: Dedicated employee sales & stock dashboard with opening/closing stock analysis, stock alerts, and opening stock editor.
+- `backend/app/routers/employee.py`: Staff dashboard stats and sales dashboard endpoints (`/employees/sales-dashboard` and `/employees/sales-dashboard/opening-stock`).
+- `frontend/src/pages/AdminSales.jsx`: Streamlined sales dashboard with Index-Wise SKU breakdown, Opening Stock, Volume Sold, Closing Stock, brand filters, and clean CSV/XLSX exports.
+- `frontend/src/pages/SalesEntry.jsx`: Sales counter with real-time stock availability verification, instant decrementation, live counter stock badges, and assigned store banner.
+- `frontend/src/context/AuthContext.jsx`: Auth context providing session persistence and `refreshUser` for dynamic store reassignments.
+- `frontend/src/components/Sidebar.jsx`: Portal navigation showing staff's assigned store counter and links.
 
 ---
 
-## 5. Instructions to Resume Tomorrow
+## 5. Instructions to Resume
 When the user says:
 - `"restart tomorrow"`
 - `"resume this conversation"`
 - `"resume tomorrow"`
 - `"continue overall sales"`
 - `"continue sales"`
-- or opens the session:
+- or references this project:
 Check that both backend (`http://localhost:8000`) and frontend (`http://localhost:5173`) are running, read this checkpoint, and resume immediately.
 

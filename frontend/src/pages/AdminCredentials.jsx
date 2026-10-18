@@ -63,7 +63,7 @@ const AdminCredentials = () => {
       setLocations(locsData);
     } catch (err) {
       console.error("Failed to load staff:", err);
-      addToast("Failed to load employee roster", "error");
+      addToast("Failed to load employee directory", "error");
     } finally {
       setLoading(false);
     }
@@ -232,7 +232,7 @@ Please log in using your User ID and the password above.`;
             </div>
           </div>
 
-          {/* Credentials Roster Table */}
+          {/* Credentials Directory Table */}
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
               <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">

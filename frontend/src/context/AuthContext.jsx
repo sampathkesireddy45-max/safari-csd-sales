@@ -37,6 +37,20 @@ export const AuthProvider = ({ children }) => {
     throw new Error("Invalid response from server");
   };
 
+  const refreshUser = async () => {
+    const token = getToken();
+    if (token) {
+      try {
+        const userData = await getMe();
+        setUser(userData);
+        return userData;
+      } catch (err) {
+        console.warn("Failed to refresh user profile:", err);
+      }
+    }
+    return null;
+  };
+
   const logout = () => {
     removeToken();
     setUser(null);
@@ -47,6 +61,7 @@ export const AuthProvider = ({ children }) => {
     loading,
     login,
     logout,
+    refreshUser,
     isAdmin: user?.role === "admin",
     isEmployee: user?.role === "employee",
   };

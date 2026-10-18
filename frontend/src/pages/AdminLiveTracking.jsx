@@ -355,7 +355,7 @@ const AdminLiveTracking = () => {
                 <span className="text-3xl font-extrabold text-slate-900 font-mono">
                   {employees.length}
                 </span>
-                <span className="text-xs text-slate-400 ml-2">rostered</span>
+                <span className="text-xs text-slate-400 ml-2">assigned</span>
               </div>
             </div>
 
@@ -460,7 +460,7 @@ const AdminLiveTracking = () => {
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
               <h4 className="text-sm font-bold text-slate-900">
-                Staff GPS Status & Proximity Roster
+                Staff GPS Status & Proximity Assigned Staff
               </h4>
               <span className="text-xs text-slate-400">
                 Showing {filteredEmployees.length} employee records

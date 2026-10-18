@@ -26,6 +26,10 @@ class Employee(Base):
     # Relationships
     assigned_location = relationship("Location", back_populates="employees")
 
+    @property
+    def assigned_location_name(self) -> str | None:
+        return self.assigned_location.name if self.assigned_location else None
+
     def set_password(self, password: str):
         salt = bcrypt.gensalt()
         self.hashed_password = bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
