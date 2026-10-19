@@ -67,7 +67,7 @@ def on_startup():
     except Exception as e:
         print(f"Startup DB init notice: {e}")
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 def health_check():
     database_status = "ok"
     try:
@@ -90,11 +90,11 @@ if FRONTEND_DIST.exists() and (FRONTEND_DIST / "index.html").exists():
     if (FRONTEND_DIST / "assets").exists():
         app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
 
-    @app.get("/")
+    @app.api_route("/", methods=["GET", "HEAD"])
     async def serve_index():
         return FileResponse(FRONTEND_DIST / "index.html")
 
-    @app.get("/{full_path:path}")
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"])
     async def serve_spa(full_path: str):
         target = FRONTEND_DIST / full_path
         if target.is_file():
