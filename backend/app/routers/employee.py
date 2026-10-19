@@ -164,7 +164,7 @@ def get_employee_sales_dashboard(
     # 2. Determine target store location for individual store metrics
     selected_loc_id = None
     is_all_stores = False
-    if location_id is not None:
+    if current_user.role == "admin" and location_id is not None:
         loc_str = str(location_id).strip().lower()
         if loc_str in ["all", "0", "overall", "network"]:
             is_all_stores = True
@@ -174,7 +174,9 @@ def get_employee_sales_dashboard(
             except ValueError:
                 selected_loc_id = employee.assigned_location_id
     else:
+        # Non-admin employees are strictly confined to their assigned store counter
         selected_loc_id = employee.assigned_location_id
+        is_all_stores = False
 
     selected_location = None
     if selected_loc_id:
@@ -342,14 +344,14 @@ def get_employee_sales_dashboard(
             "store_cases_sold": round(store_sold / pack, 2),
             "store_revenue": s_rev,
 
-            # Overall Stock & Sales (All 8 stores combined)
-            "overall_opening_stock": overall_opening,
-            "overall_closing_stock": overall_closing,
-            "overall_closing_cases": overall_closing // pack,
-            "overall_closing_remainder": overall_closing % pack,
-            "overall_pieces_sold": overall_sold,
-            "overall_cases_sold": round(overall_sold / pack, 2),
-            "overall_revenue": o_rev,
+            # Overall Stock & Sales (hidden from non-admin employee portal)
+            "overall_opening_stock": overall_opening if current_user.role == "admin" else 0,
+            "overall_closing_stock": overall_closing if current_user.role == "admin" else 0,
+            "overall_closing_cases": (overall_closing // pack) if current_user.role == "admin" else 0,
+            "overall_closing_remainder": (overall_closing % pack) if current_user.role == "admin" else 0,
+            "overall_pieces_sold": overall_sold if current_user.role == "admin" else 0,
+            "overall_cases_sold": round(overall_sold / pack, 2) if current_user.role == "admin" else 0,
+            "overall_revenue": o_rev if current_user.role == "admin" else 0.0,
 
             # Backwards-compatible aliases for existing table bindings
             "pieces_sold": my_sold,
@@ -434,11 +436,11 @@ def get_employee_sales_dashboard(
             "store_pieces_sold": total_store_sold,
             "store_revenue": total_store_revenue,
 
-            # Overall Network Stock & Sales (All Stores Combined)
-            "overall_opening_stock": total_overall_opening,
-            "overall_closing_stock": total_overall_closing,
-            "overall_pieces_sold": total_overall_sold,
-            "overall_revenue": total_overall_revenue,
+            # Overall Network Stock & Sales (hidden from non-admin employees)
+            "overall_opening_stock": total_overall_opening if current_user.role == "admin" else 0,
+            "overall_closing_stock": total_overall_closing if current_user.role == "admin" else 0,
+            "overall_pieces_sold": total_overall_sold if current_user.role == "admin" else 0,
+            "overall_revenue": total_overall_revenue if current_user.role == "admin" else 0.0,
 
             # Legacy compatibility fields
             "total_pieces_sold": total_my_sold,
@@ -462,6 +464,12 @@ def update_employee_opening_stock(
     db: Session = Depends(get_db),
     current_user: Employee = Depends(get_current_active_user)
 ):
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Permission denied: Opening and closing stock can only be modified by an Admin."
+        )
+
     target_id = current_user.id
     if current_user.role == "admin" and req.employee_id:
         target_id = req.employee_id

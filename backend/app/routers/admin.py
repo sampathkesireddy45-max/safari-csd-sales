@@ -1,8 +1,10 @@
 import csv
 import io
 from openpyxl import Workbook
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from .. import models, crud
@@ -24,6 +26,13 @@ router = APIRouter(
     dependencies=[Depends(get_current_active_admin_user)],
 )
 
+class AdminOpeningStockUpdateRequest(BaseModel):
+    product_id: int
+    location_id: int
+    opening_stock: int
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+
 def _sale_cost(sale):
     return round(sum(
         (item.product.selling_rate if item.product and item.product.selling_rate is not None
@@ -31,10 +40,16 @@ def _sale_cost(sale):
         for item in sale.items
     ), 2)
 
-def _sales_query(db: Session, employee_id: int = None, date_from: str = None, date_to: str = None):
+def _sales_query(db: Session, employee_id: int = None, location_id: str = None, date_from: str = None, date_to: str = None):
     query = db.query(models.Sale).join(models.Employee).join(models.Location)
     if employee_id:
         query = query.filter(models.Sale.employee_id == employee_id)
+    if location_id and str(location_id).strip().lower() not in ["", "all", "0", "overall", "network"]:
+        try:
+            loc_int = int(str(location_id).strip())
+            query = query.filter(models.Sale.location_id == loc_int)
+        except ValueError:
+            pass
     if date_from:
         try:
             start_utc = ist_date_to_utc_bounds(date_from, is_end_date=False)
@@ -49,10 +64,10 @@ def _sales_query(db: Session, employee_id: int = None, date_from: str = None, da
             query = query.filter(models.Sale.sale_date < datetime.fromisoformat(date_to) + timedelta(days=1))
     return query
 
-def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None):
+def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, location_id: str = None, all_network_sales = None):
     """
     Computes aggregated index-wise performance for products, combining opening stock,
-    pieces sold, closing stock, equivalent cases, revenue, and date sold.
+    pieces sold, closing stock, equivalent cases, revenue, and date sold for both individual store and overall network.
     """
     product_sales_map = {}
     for sale in all_sales:
@@ -70,16 +85,45 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None):
             if sale_date_str:
                 product_sales_map[pid]["sale_dates"].add(sale_date_str)
 
-    # Current stock from live inventory
-    stock_map = {}
-    if employee_id:
+    # Overall network sales
+    network_sales = all_network_sales if all_network_sales is not None else all_sales
+    network_sales_map = {}
+    for sale in network_sales:
+        for item in sale.items:
+            pid = item.product_id
+            network_sales_map[pid] = network_sales_map.get(pid, 0) + item.quantity
+
+    # 1. Overall stock from live inventory across all locations
+    overall_inv_rows = db.query(
+        models.Inventory.product_id,
+        func.coalesce(func.sum(models.Inventory.quantity), 0)
+    ).group_by(models.Inventory.product_id).all()
+    overall_stock_map = {row[0]: int(row[1] or 0) for row in overall_inv_rows}
+
+    # 2. Store specific stock
+    is_specific_store = False
+    store_stock_map = {}
+    if location_id and str(location_id).strip().lower() not in ["", "all", "0", "overall", "network"]:
+        try:
+            loc_int = int(str(location_id).strip())
+            inv_rows = db.query(models.Inventory.product_id, models.Inventory.quantity).filter(
+                models.Inventory.location_id == loc_int
+            ).all()
+            store_stock_map = {row[0]: int(row[1] or 0) for row in inv_rows}
+            is_specific_store = True
+        except ValueError:
+            pass
+    elif employee_id:
         emp = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
         if emp and emp.assigned_location_id:
-            inv_rows = db.query(models.Inventory.product_id, models.Inventory.quantity).filter(models.Inventory.location_id == emp.assigned_location_id).all()
-            stock_map = {row[0]: int(row[1] or 0) for row in inv_rows}
-    else:
-        inv_rows = db.query(models.Inventory.product_id, func.coalesce(func.sum(models.Inventory.quantity), 0)).group_by(models.Inventory.product_id).all()
-        stock_map = {row[0]: int(row[1] or 0) for row in inv_rows}
+            inv_rows = db.query(models.Inventory.product_id, models.Inventory.quantity).filter(
+                models.Inventory.location_id == emp.assigned_location_id
+            ).all()
+            store_stock_map = {row[0]: int(row[1] or 0) for row in inv_rows}
+            is_specific_store = True
+
+    if not is_specific_store:
+        store_stock_map = overall_stock_map.copy()
 
     products = db.query(models.Product).filter(models.Product.is_active == True).order_by(models.Product.index_no, models.Product.name).all()
     
@@ -88,6 +132,10 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None):
     total_catalog_revenue = 0.0
     total_opening_stock = 0
     total_closing_stock = 0
+    total_overall_opening = 0
+    total_overall_closing = 0
+    total_store_opening = 0
+    total_store_closing = 0
 
     for p in products:
         sales_info = product_sales_map.get(p.id, {"pieces_sold": 0, "transactions_count": 0, "sale_dates": set()})
@@ -101,13 +149,28 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None):
         revenue = round(pieces_sold * selling_rate, 2)
         cases_sold = round(pieces_sold / case_pack, 2)
 
-        closing_stock = stock_map.get(p.id, 0)
-        opening_stock = closing_stock + pieces_sold
-        
+        # Overall numbers
+        overall_closing = overall_stock_map.get(p.id, 0)
+        overall_sold = network_sales_map.get(p.id, 0)
+        overall_opening = overall_closing + overall_sold
+
+        # Store numbers
+        store_closing = store_stock_map.get(p.id, 0)
+        store_sold = pieces_sold
+        store_opening = store_closing + store_sold
+
+        # Active view numbers (based on whether store is selected or overall)
+        closing_stock = store_closing if is_specific_store else overall_closing
+        opening_stock = store_opening if is_specific_store else overall_opening
+
         total_catalog_pieces += pieces_sold
         total_catalog_revenue = round(total_catalog_revenue + revenue, 2)
         total_opening_stock += opening_stock
         total_closing_stock += closing_stock
+        total_overall_opening += overall_opening
+        total_overall_closing += overall_closing
+        total_store_opening += store_opening
+        total_store_closing += store_closing
 
         index_wise.append({
             "product_id": p.id,
@@ -122,6 +185,12 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None):
             "case_rate": case_rate,
             "opening_stock": opening_stock,
             "closing_stock": closing_stock,
+            "store_opening_stock": store_opening,
+            "store_closing_stock": store_closing,
+            "overall_opening_stock": overall_opening,
+            "overall_closing_stock": overall_closing,
+            "store_pieces_sold": store_sold,
+            "overall_pieces_sold": overall_sold,
             "total_pieces_sold": pieces_sold,
             "total_cases_sold": cases_sold,
             "total_revenue": revenue,
@@ -140,21 +209,46 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None):
         "total_revenue": total_catalog_revenue,
         "total_opening_stock": total_opening_stock,
         "total_closing_stock": total_closing_stock,
+        "overall_opening_stock": total_overall_opening,
+        "overall_closing_stock": total_overall_closing,
+        "store_opening_stock": total_store_opening,
+        "store_closing_stock": total_store_closing,
     }
 
 @router.get("/sales")
 def get_admin_sales_summary(
     employee_id: int = Query(None),
+    location_id: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
-    query = _sales_query(db, employee_id, date_from, date_to)
+    network_query = _sales_query(db, employee_id=employee_id, date_from=date_from, date_to=date_to)
+    all_network_sales = network_query.all()
+
+    query = _sales_query(db, employee_id=employee_id, location_id=location_id, date_from=date_from, date_to=date_to)
     sales = query.order_by(models.Sale.sale_date.desc()).limit(limit).all()
     all_sales = query.all()
 
-    index_wise_sales, index_summary = _build_index_wise_sales(all_sales, db, employee_id=employee_id)
+    index_wise_sales, index_summary = _build_index_wise_sales(
+        all_sales, db, employee_id=employee_id, location_id=location_id, all_network_sales=all_network_sales
+    )
+
+    all_locations = db.query(models.Location).filter(models.Location.is_active == True).order_by(models.Location.name).all()
+    is_specific_store = False
+    selected_loc_name = "All Stores Combined"
+    selected_loc_id = None
+    if location_id and str(location_id).strip().lower() not in ["", "all", "0", "overall", "network"]:
+        try:
+            loc_int = int(str(location_id).strip())
+            loc_obj = db.query(models.Location).filter(models.Location.id == loc_int).first()
+            if loc_obj:
+                selected_loc_name = loc_obj.name
+                selected_loc_id = loc_obj.id
+                is_specific_store = True
+        except ValueError:
+            pass
 
     employee_totals = db.query(
         models.Employee.id,
@@ -165,6 +259,8 @@ def get_admin_sales_summary(
     ).outerjoin(models.Sale, models.Sale.employee_id == models.Employee.id)
     if employee_id:
         employee_totals = employee_totals.filter(models.Employee.id == employee_id)
+    if location_id and is_specific_store:
+        employee_totals = employee_totals.filter(models.Sale.location_id == selected_loc_id)
     if date_from:
         try:
             start_utc = ist_date_to_utc_bounds(date_from, is_end_date=False)
@@ -187,6 +283,15 @@ def get_admin_sales_summary(
 
     return {
         "overall": {"sale_count": query.count(), "total_pieces": int(total_pieces), "total_cost": sales_cost},
+        "selected_location": {
+            "id": selected_loc_id,
+            "name": selected_loc_name,
+            "is_all_stores": not is_specific_store,
+        },
+        "locations": [
+            {"id": loc.id, "location_id": loc.location_id, "name": loc.name}
+            for loc in all_locations
+        ],
         "employees": [
             {"id": row.id, "employee_id": row.employee_id, "name": row.name, "sale_count": row.sale_count, "total_pieces": int(row.total_pieces or 0), "total_cost": employee_costs.get(row.id, 0)}
             for row in employee_totals if row.sale_count
@@ -227,14 +332,104 @@ def get_admin_sales_summary(
         ],
     }
 
+@router.post("/opening-stock")
+def update_admin_opening_stock(
+    req: AdminOpeningStockUpdateRequest,
+    db: Session = Depends(get_db),
+    current_admin: models.Employee = Depends(get_current_active_admin_user),
+):
+    product = db.query(models.Product).filter(models.Product.id == req.product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    location = db.query(models.Location).filter(models.Location.id == req.location_id).first()
+    if not location:
+        raise HTTPException(status_code=404, detail="Store location not found")
+
+    # Volume sold at this store during the period
+    sales_q = db.query(func.coalesce(func.sum(models.SaleItem.quantity), 0)).join(models.Sale, models.SaleItem.sale_id == models.Sale.id).filter(
+        models.SaleItem.product_id == req.product_id,
+        models.Sale.location_id == req.location_id,
+    )
+    if req.date_from:
+        try:
+            start_utc = ist_date_to_utc_bounds(req.date_from, is_end_date=False)
+            sales_q = sales_q.filter(models.Sale.sale_date >= start_utc)
+        except Exception:
+            sales_q = sales_q.filter(models.Sale.sale_date >= datetime.fromisoformat(req.date_from))
+    if req.date_to:
+        try:
+            end_utc = ist_date_to_utc_bounds(req.date_to, is_end_date=True)
+            sales_q = sales_q.filter(models.Sale.sale_date <= end_utc)
+        except Exception:
+            sales_q = sales_q.filter(models.Sale.sale_date <= datetime.fromisoformat(req.date_to) + timedelta(days=1))
+
+    pieces_sold = sales_q.scalar() or 0
+
+    if req.opening_stock < pieces_sold:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Opening stock ({req.opening_stock} PCS) cannot be less than the volume already sold ({pieces_sold} PCS) for {product.name} at {location.name}."
+        )
+
+    new_closing_stock = req.opening_stock - pieces_sold
+
+    inv = db.query(models.Inventory).filter(
+        models.Inventory.product_id == req.product_id,
+        models.Inventory.location_id == req.location_id,
+    ).with_for_update().first()
+
+    old_stock = 0
+    if not inv:
+        inv = models.Inventory(
+            product_id=req.product_id,
+            location_id=req.location_id,
+            quantity=new_closing_stock,
+            last_updated=datetime.utcnow()
+        )
+        db.add(inv)
+        db.flush()
+    else:
+        old_stock = inv.quantity
+        inv.quantity = new_closing_stock
+        inv.last_updated = datetime.utcnow()
+
+    diff = new_closing_stock - old_stock
+    txn = models.InventoryTransaction(
+        inventory_id=inv.id,
+        quantity_change=diff,
+        transaction_type="opening_stock_edit",
+        reference_type="admin_opening_stock_adjustment",
+        performed_by=current_admin.id
+    )
+    db.add(txn)
+    db.commit()
+
+    case_pack = product.case_pack or 1
+    return {
+        "status": "success",
+        "message": f"Successfully updated opening stock for [{product.name}] to {req.opening_stock} PCS at {location.name}. Live closing stock is {new_closing_stock} PCS.",
+        "product_id": product.id,
+        "product_name": product.name,
+        "index_no": product.index_no,
+        "opening_stock": req.opening_stock,
+        "closing_stock": new_closing_stock,
+        "closing_cases": new_closing_stock // case_pack,
+        "closing_remainder": new_closing_stock % case_pack,
+        "pieces_sold": pieces_sold,
+        "location_id": location.id,
+        "location_name": location.name
+    }
+
 @router.get("/sales/export")
 def export_admin_sales(
     employee_id: int = Query(None),
+    location_id: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
     db: Session = Depends(get_db),
 ):
-    sales = _sales_query(db, employee_id, date_from, date_to).order_by(models.Sale.sale_date.desc()).all()
+    sales = _sales_query(db, employee_id, location_id, date_from, date_to).order_by(models.Sale.sale_date.desc()).all()
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow([
@@ -270,7 +465,7 @@ def export_admin_sales(
         ])
     output.seek(0)
     csv_content = "\ufeff" + output.getvalue()
-    scope = f"employee_{employee_id}" if employee_id else "overall"
+    scope = f"location_{location_id}" if location_id and location_id not in ["all", "0"] else (f"employee_{employee_id}" if employee_id else "overall")
     return StreamingResponse(
         iter([csv_content]),
         media_type="text/csv",
@@ -280,12 +475,16 @@ def export_admin_sales(
 @router.get("/sales/export/index-wise/csv")
 def export_admin_sales_index_wise_csv(
     employee_id: int = Query(None),
+    location_id: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
     db: Session = Depends(get_db),
 ):
-    sales = _sales_query(db, employee_id, date_from, date_to).order_by(models.Sale.sale_date.desc()).all()
-    index_wise_sales, _ = _build_index_wise_sales(sales, db, employee_id=employee_id)
+    network_query = _sales_query(db, employee_id, None, date_from, date_to)
+    all_network_sales = network_query.all()
+
+    sales = _sales_query(db, employee_id, location_id, date_from, date_to).order_by(models.Sale.sale_date.desc()).all()
+    index_wise_sales, _ = _build_index_wise_sales(sales, db, employee_id=employee_id, location_id=location_id, all_network_sales=all_network_sales)
     
     output = io.StringIO(newline="")
     writer = csv.writer(output)
@@ -297,9 +496,11 @@ def export_admin_sales_index_wise_csv(
         "Category",
         "Sub Category",
         "Case Pack (Pcs)",
-        "Opening Stock (Pcs)",
-        "Volume Sold (Pcs)",
-        "Closing Stock (Pcs)",
+        "Store Opening Stock (Pcs)",
+        "Store Volume Sold (Pcs)",
+        "Store Closing Stock (Pcs)",
+        "Overall Opening Stock (Pcs)",
+        "Overall Closing Stock (Pcs)",
         "Selling Rate / Pc (INR)",
         "Case Rate (INR)",
         "Total Cases Sold",
@@ -315,9 +516,11 @@ def export_admin_sales_index_wise_csv(
             it["category"],
             it["sub_category"],
             it["case_pack"],
-            it.get("opening_stock", 0),
+            it.get("store_opening_stock", 0),
             it["total_pieces_sold"],
-            it.get("closing_stock", 0),
+            it.get("store_closing_stock", 0),
+            it.get("overall_opening_stock", 0),
+            it.get("overall_closing_stock", 0),
             f"{it['selling_rate']:.2f}",
             f"{it['case_rate']:.2f}",
             f"{it['total_cases_sold']:.2f}",
@@ -326,7 +529,7 @@ def export_admin_sales_index_wise_csv(
         ])
     output.seek(0)
     csv_content = "\ufeff" + output.getvalue()
-    scope = f"employee_{employee_id}" if employee_id else "overall"
+    scope = f"location_{location_id}" if location_id and location_id not in ["all", "0"] else (f"employee_{employee_id}" if employee_id else "overall")
     return StreamingResponse(
         iter([csv_content]),
         media_type="text/csv",
@@ -336,12 +539,16 @@ def export_admin_sales_index_wise_csv(
 @router.get("/sales/export/xlsx")
 def export_admin_sales_xlsx(
     employee_id: int = Query(None),
+    location_id: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
     db: Session = Depends(get_db),
 ):
-    sales = _sales_query(db, employee_id, date_from, date_to).order_by(models.Sale.sale_date.desc()).all()
-    index_wise_sales, _ = _build_index_wise_sales(sales, db, employee_id=employee_id)
+    network_query = _sales_query(db, employee_id, None, date_from, date_to)
+    all_network_sales = network_query.all()
+
+    sales = _sales_query(db, employee_id, location_id, date_from, date_to).order_by(models.Sale.sale_date.desc()).all()
+    index_wise_sales, _ = _build_index_wise_sales(sales, db, employee_id=employee_id, location_id=location_id, all_network_sales=all_network_sales)
 
     workbook = Workbook()
 
@@ -356,9 +563,11 @@ def export_admin_sales_xlsx(
         "Category",
         "Sub Category",
         "Case Pack (Pcs)",
-        "Opening Stock (Pcs)",
-        "Volume Sold (Pcs)",
-        "Closing Stock (Pcs)",
+        "Store Opening Stock (Pcs)",
+        "Store Volume Sold (Pcs)",
+        "Store Closing Stock (Pcs)",
+        "Overall Opening Stock (Pcs)",
+        "Overall Closing Stock (Pcs)",
         "Selling Rate / Pc (INR)",
         "Case Rate (INR)",
         "Total Cases Sold",
@@ -375,9 +584,11 @@ def export_admin_sales_xlsx(
             it["category"],
             it["sub_category"],
             it["case_pack"],
-            it.get("opening_stock", 0),
+            it.get("store_opening_stock", 0),
             it["total_pieces_sold"],
-            it.get("closing_stock", 0),
+            it.get("store_closing_stock", 0),
+            it.get("overall_opening_stock", 0),
+            it.get("overall_closing_stock", 0),
             it["selling_rate"],
             it["case_rate"],
             it["total_cases_sold"],
@@ -393,9 +604,11 @@ def export_admin_sales_xlsx(
         f"=SUM(H2:H{total_idx_row-1})",
         f"=SUM(I2:I{total_idx_row-1})",
         f"=SUM(J2:J{total_idx_row-1})",
+        f"=SUM(K2:K{total_idx_row-1})",
+        f"=SUM(L2:L{total_idx_row-1})",
         "", "",
-        f"=SUM(M2:M{total_idx_row-1})",
-        f"=SUM(N2:N{total_idx_row-1})",
+        f"=SUM(O2:O{total_idx_row-1})",
+        f"=SUM(P2:P{total_idx_row-1})",
         "",
     ])
 
@@ -405,24 +618,26 @@ def export_admin_sales_xlsx(
         cell.font = cell.font.copy(bold=True)
 
     ws_index.freeze_panes = "A2"
-    ws_index.auto_filter.ref = f"A1:O{total_idx_row-1}"
+    ws_index.auto_filter.ref = f"A1:Q{total_idx_row-1}"
 
     # Number formats
-    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=8, max_col=10):
+    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=8, max_col=12):
         row[0].number_format = '#,##0'
         row[1].number_format = '#,##0'
         row[2].number_format = '#,##0'
-    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=11, max_col=12):
+        row[3].number_format = '#,##0'
+        row[4].number_format = '#,##0'
+    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=13, max_col=14):
         row[0].number_format = '#,##0.00'
         row[1].number_format = '#,##0.00'
-    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=13, max_col=14):
+    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=15, max_col=16):
         row[0].number_format = '#,##0.00'
         row[1].number_format = '#,##0.00'
 
     column_widths = {
         "A": 14, "B": 32, "C": 14, "D": 14, "E": 12, "F": 16,
-        "G": 16, "H": 20, "I": 20, "J": 20, "K": 22, "L": 18,
-        "M": 18, "N": 22, "O": 26
+        "G": 16, "H": 20, "I": 20, "J": 20, "K": 20, "L": 20,
+        "M": 22, "N": 18, "O": 18, "P": 22, "Q": 26
     }
     for col, width in column_widths.items():
         ws_index.column_dimensions[col].width = width
@@ -430,7 +645,7 @@ def export_admin_sales_xlsx(
     output = io.BytesIO()
     workbook.save(output)
     output.seek(0)
-    scope = f"employee_{employee_id}" if employee_id else "overall"
+    scope = f"location_{location_id}" if location_id and location_id not in ["all", "0"] else (f"employee_{employee_id}" if employee_id else "overall")
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

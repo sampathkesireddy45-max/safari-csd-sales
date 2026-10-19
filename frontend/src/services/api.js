@@ -411,6 +411,13 @@ export const getEmployeeSalesDashboard = async (params = {}) => {
   return await fetchApi(`/employees/sales-dashboard${search.toString() ? `?${search}` : ""}`);
 };
 
+export const updateAdminOpeningStock = async (payload) => {
+  return await fetchApi("/admin/dashboard/opening-stock", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+};
+
 export const updateEmployeeOpeningStock = async (payload) => {
   return await fetchApi("/employees/sales-dashboard/opening-stock", {
     method: "POST",
