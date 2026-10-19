@@ -68,11 +68,12 @@ def on_startup():
         print(f"Startup DB init notice: {e}")
 
 @app.get("/api/health")
-async def health_check():
+def health_check():
     database_status = "ok"
     try:
         with engine.connect() as connection:
             connection.execute(__import__("sqlalchemy").text("SELECT 1"))
+            connection.commit()
     except Exception:
         database_status = "unavailable"
     return {
