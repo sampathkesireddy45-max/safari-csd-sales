@@ -1,7 +1,7 @@
 # Safari CSD Sales & Stock Telemetry - Session Checkpoint
 
-**Last Saved Timestamp:** October 18, 2026 - 22:48 IST  
-**Conversation ID:** `0dde77ff-05ae-4161-8b6b-becd775c444e` (resumed from `c5cac8be-450b-42f8-aca6-df8d20ae1aec`)  
+**Last Saved Timestamp:** October 19, 2026 - 21:42 IST  
+**Conversation ID:** `b4b8acca-8d4f-40f7-ade9-84c8f9ff6af6`  
 **Workspace Path:** `C:\Users\sampa\overall sales`  
 
 ---
@@ -19,10 +19,12 @@
 ---
 
 ## 2. Active Services & URLs
+- **Production Live URL (Render)**: [https://safari-csd-sales-1.onrender.com](https://safari-csd-sales-1.onrender.com)
+- **Production Health Check Endpoint**: [https://safari-csd-sales-1.onrender.com/api/health](https://safari-csd-sales-1.onrender.com/api/health)
+- **Active 24/7 Keep-Alive Monitor**: UptimeRobot HTTP(s) Monitor active on `/api/health` (5-minute interval, Status: GREEN / UP)
 - **GitHub Repository**: [https://github.com/sampathkesireddy45-max/safari-csd-sales](https://github.com/sampathkesireddy45-max/safari-csd-sales)
-- **Public Live Deployment Link**: [https://booking-insulin-shorter-quantitative.trycloudflare.com](https://booking-insulin-shorter-quantitative.trycloudflare.com)
-- **Frontend App**: `http://localhost:5173` (Vite dev, running `--host`)
-- **Backend API**: `http://localhost:8000` (FastAPI + SQLAlchemy + SQLite `backend/test.db`, running `--reload`)
+- **Local Frontend App**: `http://localhost:5173` (Vite dev, running `--host`)
+- **Local Backend API**: `http://localhost:8000` (FastAPI + SQLAlchemy + SQLite `backend/test.db`, running `--reload`)
 - **Interactive API Docs**: `http://localhost:8000/docs`
 
 ---
