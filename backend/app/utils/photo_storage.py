@@ -61,10 +61,10 @@ def validate_and_process_photo(file_bytes: bytes, original_filename: str) -> dic
             detail="Please upload a valid JPG, PNG, or WEBP image."
         )
 
-    # 3. Compression, Resizing & Metadata Stripping
-    max_dim = 1920
+    # 3. Fast Compression, Resizing & Metadata Stripping
+    max_dim = 1600
     if image.width > max_dim or image.height > max_dim:
-        image.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+        image.thumbnail((max_dim, max_dim), Image.Resampling.BILINEAR)
 
     # Generate unique storage key
     ext = "jpg" if format_name == "JPEG" else format_name.lower()
@@ -76,18 +76,18 @@ def validate_and_process_photo(file_bytes: bytes, original_filename: str) -> dic
     if format_name == "JPEG":
         if image.mode in ("RGBA", "P"):
             image = image.convert("RGB")
-        image.save(output_buffer, format="JPEG", quality=85, optimize=True)
+        image.save(output_buffer, format="JPEG", quality=82)
         mime_type = "image/jpeg"
     elif format_name == "PNG":
-        image.save(output_buffer, format="PNG", optimize=True)
+        image.save(output_buffer, format="PNG")
         mime_type = "image/png"
     elif format_name == "WEBP":
-        image.save(output_buffer, format="WEBP", quality=85)
+        image.save(output_buffer, format="WEBP", quality=82)
         mime_type = "image/webp"
     else:
         if image.mode in ("RGBA", "P"):
             image = image.convert("RGB")
-        image.save(output_buffer, format="JPEG", quality=85, optimize=True)
+        image.save(output_buffer, format="JPEG", quality=82)
         mime_type = "image/jpeg"
 
     processed_bytes = output_buffer.getvalue()

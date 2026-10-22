@@ -3,6 +3,8 @@ import { loginApi, getMe, setToken, removeToken, getToken } from "../services/ap
 
 const AuthContext = createContext();
 
+let pendingRefresh = null;
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -39,16 +41,24 @@ export const AuthProvider = ({ children }) => {
 
   const refreshUser = async () => {
     const token = getToken();
-    if (token) {
+    if (!token) return null;
+    if (pendingRefresh) return pendingRefresh;
+
+    pendingRefresh = (async () => {
       try {
         const userData = await getMe();
         setUser(userData);
         return userData;
       } catch (err) {
         console.warn("Failed to refresh user profile:", err);
+        return null;
+      } finally {
+        setTimeout(() => {
+          pendingRefresh = null;
+        }, 1500);
       }
-    }
-    return null;
+    })();
+    return pendingRefresh;
   };
 
   const logout = () => {

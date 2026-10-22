@@ -23,9 +23,9 @@ class Product(Base):
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     # Relationships
-    inventory_items = relationship("Inventory", back_populates="product", cascade="all, delete-orphan")
-    sale_items = relationship("SaleItem", back_populates="product")
-    damage_items = relationship("DamageReportItem", back_populates="product")
+    inventory_items = relationship("Inventory", back_populates="product", cascade="all, delete-orphan", lazy="selectin")
+    sale_items = relationship("SaleItem", back_populates="product", lazy="selectin")
+    damage_items = relationship("DamageReportItem", back_populates="product", lazy="selectin")
 
     @property
     def total_stock(self) -> int:

@@ -118,7 +118,22 @@ const EmployeeDashboard = () => {
     setStockModalOpen(true);
   };
 
-  const handleStockUpdateSuccess = () => {
+  const handleStockUpdateSuccess = (updatedInv) => {
+    if (updatedInv) {
+      setStats((prev) => ({
+        ...prev,
+        currentStock: (prev.currentStock || []).map((it) =>
+          it.product_id === updatedInv.product_id
+            ? {
+                ...it,
+                quantity: updatedInv.quantity,
+                cases: updatedInv.cases,
+                remainder_pieces: updatedInv.remainder_pieces,
+              }
+            : it
+        ),
+      }));
+    }
     fetchStats();
   };
 

@@ -7,14 +7,14 @@ class DamageReport(Base):
     __tablename__ = "damage_reports"
 
     id = Column(Integer, primary_key=True, index=True)
-    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
-    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
-    report_date = Column(DateTime, default=datetime.datetime.utcnow)
-    status = Column(String, default="pending")  # pending, approved, rejected, resolved
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False, index=True)
+    report_date = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    status = Column(String, default="pending", index=True)  # pending, approved, rejected, resolved
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     # Relationships
-    employee = relationship("Employee")
-    location = relationship("Location")
-    items = relationship("DamageReportItem", back_populates="damage_report", cascade="all, delete-orphan")
-    photos = relationship("DamagePhoto", back_populates="damage_report", cascade="all, delete-orphan")
+    employee = relationship("Employee", lazy="joined")
+    location = relationship("Location", lazy="joined")
+    items = relationship("DamageReportItem", back_populates="damage_report", cascade="all, delete-orphan", lazy="selectin")
+    photos = relationship("DamagePhoto", back_populates="damage_report", cascade="all, delete-orphan", lazy="selectin")

@@ -1,7 +1,18 @@
 const configuredBackendUrl = import.meta.env.VITE_BACKEND_URL?.trim();
+
+const getDevBackendUrl = () => {
+  if (typeof window === "undefined") return "http://127.0.0.1:8000";
+  const hostname = window.location.hostname;
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    // Explicit 127.0.0.1 avoids Windows IPv6 localhost DNS timeout (2s)
+    return "http://127.0.0.1:8000";
+  }
+  return `http://${hostname}:8000`;
+};
+
 export const API_BASE_URL = configuredBackendUrl
-  || (typeof window !== "undefined" && window.location.port === "5173"
-    ? "http://localhost:8000"
+  || (typeof window !== "undefined" && (window.location.port === "5173" || window.location.port === "5174" || window.location.port === "3000")
+    ? getDevBackendUrl()
     : "");
 
 // Retrieve token from storage
@@ -241,11 +252,27 @@ export const deleteEmployee = async (employeeId) => {
 };
 
 // --- Location API ---
-export const getLocations = async () => {
-  return await fetchApi("/locations/");
+let locationsCache = null;
+let locationsCacheTime = 0;
+
+export const invalidateLocationsCache = () => {
+  locationsCache = null;
+  locationsCacheTime = 0;
+};
+
+export const getLocations = async (forceRefresh = false) => {
+  const now = Date.now();
+  if (!forceRefresh && locationsCache && (now - locationsCacheTime < 60000)) {
+    return locationsCache;
+  }
+  const data = await fetchApi("/locations/");
+  locationsCache = data;
+  locationsCacheTime = now;
+  return data;
 };
 
 export const createLocation = async (locationData) => {
+  invalidateLocationsCache();
   return await fetchApi("/locations/", {
     method: "POST",
     body: JSON.stringify(locationData),
@@ -253,6 +280,7 @@ export const createLocation = async (locationData) => {
 };
 
 export const updateLocation = async (locationId, locationData) => {
+  invalidateLocationsCache();
   return await fetchApi(`/locations/${locationId}`, {
     method: "PUT",
     body: JSON.stringify(locationData),
@@ -260,6 +288,7 @@ export const updateLocation = async (locationId, locationData) => {
 };
 
 export const deleteLocation = async (locationId) => {
+  invalidateLocationsCache();
   return await fetchApi(`/locations/${locationId}`, {
     method: "DELETE",
   });
@@ -296,7 +325,22 @@ export const resetEmployeePassword = async (employeeId, password) => {
   });
 };
 
-export const getProducts = async (params = {}) => {
+let productsCache = null;
+let productsCacheTime = 0;
+
+export const invalidateProductsCache = () => {
+  productsCache = null;
+  productsCacheTime = 0;
+};
+
+export const getProducts = async (params = {}, forceRefresh = false) => {
+  const hasParams = Object.keys(params).some(
+    (key) => params[key] !== undefined && params[key] !== null && params[key] !== ""
+  );
+  const now = Date.now();
+  if (!hasParams && !forceRefresh && productsCache && (now - productsCacheTime < 15000)) {
+    return productsCache;
+  }
   const searchParams = new URLSearchParams();
   Object.keys(params).forEach((key) => {
     if (params[key] !== undefined && params[key] !== null && params[key] !== "") {
@@ -305,10 +349,16 @@ export const getProducts = async (params = {}) => {
   });
   const queryString = searchParams.toString();
   const endpoint = queryString ? `/products/?${queryString}` : "/products/";
-  return await fetchApi(endpoint);
+  const data = await fetchApi(endpoint);
+  if (!hasParams) {
+    productsCache = data;
+    productsCacheTime = now;
+  }
+  return data;
 };
 
 export const createProduct = async (productData) => {
+  invalidateProductsCache();
   return await fetchApi("/products/", {
     method: "POST",
     body: JSON.stringify(productData),
@@ -316,6 +366,7 @@ export const createProduct = async (productData) => {
 };
 
 export const updateProduct = async (productId, productData) => {
+  invalidateProductsCache();
   return await fetchApi(`/products/${productId}`, {
     method: "PUT",
     body: JSON.stringify(productData),
@@ -323,6 +374,7 @@ export const updateProduct = async (productId, productData) => {
 };
 
 export const deleteProduct = async (productId) => {
+  invalidateProductsCache();
   return await fetchApi(`/products/${productId}`, {
     method: "DELETE",
   });
@@ -342,6 +394,7 @@ export const getInventories = async (params = {}) => {
 };
 
 export const updateStock = async (stockData) => {
+  invalidateProductsCache();
   return await fetchApi("/inventory/update-stock", {
     method: "POST",
     body: JSON.stringify(stockData),

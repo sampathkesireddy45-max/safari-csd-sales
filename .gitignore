@@ -42,3 +42,7 @@ backend/uploads/damage_photos/*
 Thumbs.db
 *.swp
 *.swo
+
+# SQLite WAL and shared memory files
+*.db-wal
+*.db-shm

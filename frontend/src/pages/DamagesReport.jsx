@@ -29,6 +29,60 @@ import {
   Trash2
 } from "lucide-react";
 
+const compressImageBeforeUpload = (file) => {
+  return new Promise((resolve) => {
+    if (!file || !file.type || !file.type.startsWith("image/")) {
+      return resolve(file);
+    }
+    if (file.size < 400 * 1024) {
+      return resolve(file);
+    }
+
+    const img = new Image();
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const maxDim = 1600;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => {
+            if (blob && blob.size < file.size) {
+              const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), {
+                type: "image/jpeg",
+                lastModified: Date.now(),
+              });
+              resolve(compressedFile);
+            } else {
+              resolve(file);
+            }
+          },
+          "image/jpeg",
+          0.82
+        );
+      };
+      img.onerror = () => resolve(file);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
+};
+
 const DamagesReport = () => {
   const { user } = useAuth();
   const { addToast } = useToast();
@@ -162,9 +216,10 @@ const DamagesReport = () => {
       // 1. Upload photo if selected
       if (selectedFile) {
         setIsUploading(true);
-        setUploadProgress(10);
+        setUploadProgress(15);
 
-        const photoMeta = await uploadDamagePhoto(selectedFile, (progress) => {
+        const fileToUpload = await compressImageBeforeUpload(selectedFile);
+        const photoMeta = await uploadDamagePhoto(fileToUpload, (progress) => {
           setUploadProgress(progress);
         });
 

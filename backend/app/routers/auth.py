@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from ..models.employee import Employee
 from ..utils.database import get_db
 from ..utils.auth import create_access_token, get_current_active_user
@@ -37,7 +37,9 @@ class LoginResponse(BaseModel):
 def login(creds: LoginRequest, db: Session = Depends(get_db)):
     from sqlalchemy import func
     identifier = creds.email.strip()
-    employee = db.query(Employee).filter(
+    employee = db.query(Employee).options(joinedload(Employee.assigned_location)).filter(
+        (Employee.email == identifier) |
+        (Employee.employee_id == identifier) |
         (func.lower(Employee.email) == identifier.lower()) |
         (func.lower(Employee.employee_id) == identifier.lower())
     ).first()

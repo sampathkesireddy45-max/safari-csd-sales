@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func
 from .. import models, crud
 from ..utils.database import get_db
@@ -41,7 +41,11 @@ def _sale_cost(sale):
     ), 2)
 
 def _sales_query(db: Session, employee_id: int = None, location_id: str = None, date_from: str = None, date_to: str = None):
-    query = db.query(models.Sale).join(models.Employee).join(models.Location)
+    query = db.query(models.Sale).join(models.Employee).join(models.Location).options(
+        joinedload(models.Sale.employee),
+        joinedload(models.Sale.location),
+        selectinload(models.Sale.items).joinedload(models.SaleItem.product),
+    )
     if employee_id:
         query = query.filter(models.Sale.employee_id == employee_id)
     if location_id and str(location_id).strip().lower() not in ["", "all", "0", "overall", "network"]:
@@ -50,18 +54,24 @@ def _sales_query(db: Session, employee_id: int = None, location_id: str = None, 
             query = query.filter(models.Sale.location_id == loc_int)
         except ValueError:
             pass
-    if date_from:
+    if date_from and str(date_from).strip():
         try:
-            start_utc = ist_date_to_utc_bounds(date_from, is_end_date=False)
+            start_utc = ist_date_to_utc_bounds(str(date_from).strip(), is_end_date=False)
             query = query.filter(models.Sale.sale_date >= start_utc)
         except Exception:
-            query = query.filter(models.Sale.sale_date >= datetime.fromisoformat(date_from))
-    if date_to:
+            try:
+                query = query.filter(models.Sale.sale_date >= datetime.fromisoformat(str(date_from).strip()))
+            except Exception:
+                pass
+    if date_to and str(date_to).strip():
         try:
-            end_utc = ist_date_to_utc_bounds(date_to, is_end_date=True)
+            end_utc = ist_date_to_utc_bounds(str(date_to).strip(), is_end_date=True)
             query = query.filter(models.Sale.sale_date <= end_utc)
         except Exception:
-            query = query.filter(models.Sale.sale_date < datetime.fromisoformat(date_to) + timedelta(days=1))
+            try:
+                query = query.filter(models.Sale.sale_date < datetime.fromisoformat(str(date_to).strip()) + timedelta(days=1))
+            except Exception:
+                pass
     return query
 
 def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, location_id: str = None, all_network_sales = None):
@@ -217,10 +227,10 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
 
 @router.get("/sales")
 def get_admin_sales_summary(
-    employee_id: int = Query(None),
-    location_id: str = Query(None),
-    date_from: str = Query(None),
-    date_to: str = Query(None),
+    employee_id: Optional[int] = Query(None),
+    location_id: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
@@ -740,31 +750,45 @@ def get_admin_dashboard_stats(db: Session = Depends(get_db)):
             ]
         })
 
-    # Real Database 7-Day Trend Analytics
+    # Real Database 7-Day Trend Analytics - Single fast batch query
+    seven_days_ago = ist_today - timedelta(days=6)
+    range_start = ist_date_to_utc_bounds(str(seven_days_ago), is_end_date=False)
+    range_end = ist_date_to_utc_bounds(str(ist_today), is_end_date=True)
+
+    # 1 query for all sales in the 7-day window
+    recent_sales = db.query(models.Sale.sale_date, models.Sale.total_pieces).filter(
+        models.Sale.sale_date >= range_start,
+        models.Sale.sale_date <= range_end
+    ).all()
+    sales_by_date = {}
+    for s_date, pieces in recent_sales:
+        if s_date:
+            d_str = to_ist(s_date).strftime("%Y-%m-%d")
+            sales_by_date[d_str] = sales_by_date.get(d_str, 0) + (pieces or 0)
+
+    # 1 query for all damages in the 7-day window
+    recent_damage_items = db.query(models.DamageReport.report_date, models.DamageReportItem.quantity).join(
+        models.DamageReport, models.DamageReportItem.damage_report_id == models.DamageReport.id
+    ).filter(
+        models.DamageReport.report_date >= range_start,
+        models.DamageReport.report_date <= range_end,
+        models.DamageReport.status != "replaced"
+    ).all()
+    damages_by_date = {}
+    for r_date, qty in recent_damage_items:
+        if r_date:
+            d_str = to_ist(r_date).strftime("%Y-%m-%d")
+            damages_by_date[d_str] = damages_by_date.get(d_str, 0) + (qty or 0)
+
     daily_trends = []
     for i in range(6, -1, -1):
         target_date = ist_today - timedelta(days=i)
-        day_start = ist_date_to_utc_bounds(str(target_date), is_end_date=False)
-        day_end = ist_date_to_utc_bounds(str(target_date), is_end_date=True)
-
-        day_sales = db.query(models.Sale).filter(
-            models.Sale.sale_date >= day_start,
-            models.Sale.sale_date <= day_end
-        ).with_entities(func.sum(models.Sale.total_pieces)).scalar() or 0
-
-        day_damages = db.query(models.DamageReportItem).join(
-            models.DamageReport, models.DamageReportItem.damage_report_id == models.DamageReport.id
-        ).filter(
-            models.DamageReport.report_date >= day_start,
-            models.DamageReport.report_date <= day_end,
-            models.DamageReport.status != "replaced"
-        ).with_entities(func.sum(models.DamageReportItem.quantity)).scalar() or 0
-
+        d_str = target_date.strftime("%Y-%m-%d")
         daily_trends.append({
             "date": target_date.strftime("%a %d"),
-            "fullDate": target_date.strftime("%Y-%m-%d"),
-            "sales": int(day_sales),
-            "damages": int(day_damages),
+            "fullDate": d_str,
+            "sales": int(sales_by_date.get(d_str, 0)),
+            "damages": int(damages_by_date.get(d_str, 0)),
         })
 
     return {

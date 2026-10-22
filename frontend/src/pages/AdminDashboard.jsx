@@ -227,6 +227,19 @@ const AdminDashboard = () => {
     }
   };
 
+  const handleStockUpdateSuccess = (updatedInv) => {
+    if (updatedInv) {
+      setProducts((prev) =>
+        prev.map((p) =>
+          p.id === updatedInv.product_id
+            ? { ...p, total_stock: updatedInv.quantity }
+            : p
+        )
+      );
+    }
+    fetchStats();
+  };
+
   const fetchStats = async () => {
     try {
       const [statsData, productsData, locationsData, salesData] = await Promise.all([
@@ -1123,7 +1136,7 @@ const AdminDashboard = () => {
       <StockEntryModal
         isOpen={stockModalOpen}
         onClose={() => setStockModalOpen(false)}
-        onSuccess={fetchStats}
+        onSuccess={handleStockUpdateSuccess}
         products={products}
         locations={locations}
         isAdmin={true}

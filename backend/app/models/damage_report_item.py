@@ -7,11 +7,11 @@ class DamageReportItem(Base):
     __tablename__ = "damage_report_items"
 
     id = Column(Integer, primary_key=True, index=True)
-    damage_report_id = Column(Integer, ForeignKey("damage_reports.id"), nullable=False)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    damage_report_id = Column(Integer, ForeignKey("damage_reports.id"), nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
     quantity = Column(Integer, nullable=False)
     description = Column(String, nullable=True)
 
     # Relationships
     damage_report = relationship("DamageReport", back_populates="items")
-    product = relationship("Product", back_populates="damage_items")
+    product = relationship("Product", back_populates="damage_items", lazy="joined")

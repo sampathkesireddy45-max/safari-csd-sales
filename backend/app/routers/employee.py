@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from typing import Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func
 from ..models.employee import Employee
 from ..models.sale import Sale
@@ -185,7 +185,10 @@ def get_employee_sales_dashboard(
     assigned_loc_name = employee.assigned_location.name if employee.assigned_location else "Not assigned"
 
     # 3. Employee's individual sales
-    emp_sales_q = db.query(Sale).filter(Sale.employee_id == target_id)
+    emp_sales_q = db.query(Sale).filter(Sale.employee_id == target_id).options(
+        joinedload(Sale.location),
+        selectinload(Sale.items).joinedload(SaleItem.product),
+    )
     if start_utc:
         emp_sales_q = emp_sales_q.filter(Sale.sale_date >= start_utc)
     if end_utc:
@@ -204,32 +207,31 @@ def get_employee_sales_dashboard(
             emp_sales_map[pid]["pieces_sold"] += it.quantity
             emp_sales_map[pid]["transactions_count"] += 1
 
-    # 4. Overall Sales (all stores combined)
-    overall_sales_q = db.query(Sale)
+    # 4. Overall Sales (all stores combined) - single SQL aggregate query
+    overall_item_q = db.query(
+        SaleItem.product_id,
+        func.coalesce(func.sum(SaleItem.quantity), 0)
+    ).join(Sale, SaleItem.sale_id == Sale.id)
     if start_utc:
-        overall_sales_q = overall_sales_q.filter(Sale.sale_date >= start_utc)
+        overall_item_q = overall_item_q.filter(Sale.sale_date >= start_utc)
     if end_utc:
-        overall_sales_q = overall_sales_q.filter(Sale.sale_date <= end_utc)
-    all_overall_sales = overall_sales_q.all()
+        overall_item_q = overall_item_q.filter(Sale.sale_date <= end_utc)
+    overall_sales_map = {row[0]: int(row[1] or 0) for row in overall_item_q.group_by(SaleItem.product_id).all()}
 
-    overall_sales_map = {}
-    for sale in all_overall_sales:
-        for it in sale.items:
-            overall_sales_map[it.product_id] = overall_sales_map.get(it.product_id, 0) + it.quantity
-
-    # 5. Store Sales (selected individual store)
+    # 5. Store Sales (selected individual store) - single SQL aggregate query
     store_sales_map = {}
     if is_all_stores:
         store_sales_map = overall_sales_map.copy()
     elif selected_loc_id:
-        store_sales_q = db.query(Sale).filter(Sale.location_id == selected_loc_id)
+        store_item_q = db.query(
+            SaleItem.product_id,
+            func.coalesce(func.sum(SaleItem.quantity), 0)
+        ).join(Sale, SaleItem.sale_id == Sale.id).filter(Sale.location_id == selected_loc_id)
         if start_utc:
-            store_sales_q = store_sales_q.filter(Sale.sale_date >= start_utc)
+            store_item_q = store_item_q.filter(Sale.sale_date >= start_utc)
         if end_utc:
-            store_sales_q = store_sales_q.filter(Sale.sale_date <= end_utc)
-        for sale in store_sales_q.all():
-            for it in sale.items:
-                store_sales_map[it.product_id] = store_sales_map.get(it.product_id, 0) + it.quantity
+            store_item_q = store_item_q.filter(Sale.sale_date <= end_utc)
+        store_sales_map = {row[0]: int(row[1] or 0) for row in store_item_q.group_by(SaleItem.product_id).all()}
 
     # 6. Inventories
     # Overall stock across all locations
