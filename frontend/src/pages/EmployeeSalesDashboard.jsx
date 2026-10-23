@@ -30,7 +30,8 @@ import {
   Globe2,
   Store,
   Edit2,
-  Edit3
+  Edit3,
+  ArrowDownToLine,
 } from "lucide-react";
 
 const EmployeeSalesDashboard = () => {
@@ -307,7 +308,7 @@ const EmployeeSalesDashboard = () => {
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
             {/* Store Opening Stock */}
             <div className="bg-gradient-to-br from-blue-50/80 to-white rounded-2xl p-4 border border-blue-200/80 shadow-sm relative overflow-hidden">
               <div className="flex items-center justify-between text-blue-600 mb-1.5">
@@ -321,6 +322,22 @@ const EmployeeSalesDashboard = () => {
               </div>
               <div className="text-[11px] font-medium text-blue-700/80 mt-1">
                 <span>Assigned store starting stock</span>
+              </div>
+            </div>
+
+            {/* Store Receiving Stock */}
+            <div className="bg-gradient-to-br from-teal-50/80 to-white rounded-2xl p-4 border border-teal-200/80 shadow-sm relative overflow-hidden">
+              <div className="flex items-center justify-between text-teal-600 mb-1.5">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-teal-800">
+                  Store Receiving Stock
+                </span>
+                <ArrowDownToLine className="w-4 h-4 text-teal-600" />
+              </div>
+              <div className="text-2xl font-black text-teal-950">
+                {(summary.store_receiving_stock ?? summary.total_receiving_stock ?? 0).toLocaleString()} <span className="text-xs font-bold text-teal-500">PCS</span>
+              </div>
+              <div className="text-[11px] font-medium text-teal-700/80 mt-1">
+                <span>Inward received stock & transfers</span>
               </div>
             </div>
 
@@ -524,6 +541,10 @@ const EmployeeSalesDashboard = () => {
                           Opening Stock
                           <span className="block text-[9px] font-normal text-blue-700 lowercase">(assigned store)</span>
                         </th>
+                        <th className="px-4 py-3.5 font-bold text-center bg-teal-50/70 text-teal-900">
+                          Receiving Stock
+                          <span className="block text-[9px] font-normal text-teal-700 lowercase">(inward / transfers)</span>
+                        </th>
                         <th className="px-4 py-3.5 font-bold text-center bg-indigo-50/70 text-indigo-900 border-r border-indigo-100">
                           Closing Stock
                           <span className="block text-[9px] font-normal text-indigo-700 lowercase">(live store counter)</span>
@@ -536,6 +557,7 @@ const EmployeeSalesDashboard = () => {
                       {filteredItems.map((item) => {
                         const storeClosing = item.store_closing_stock ?? item.closing_stock ?? 0;
                         const storeOpening = item.store_opening_stock ?? item.opening_stock ?? 0;
+                        const storeReceiving = item.store_receiving_stock ?? item.receiving_stock ?? 0;
                         const overallClosing = item.overall_closing_stock ?? 0;
                         const overallOpening = item.overall_opening_stock ?? 0;
                         const mySold = item.my_pieces_sold ?? item.pieces_sold ?? 0;
@@ -607,6 +629,15 @@ const EmployeeSalesDashboard = () => {
                                 </span>
                                 <Edit2 className="w-3 h-3 text-blue-500 opacity-60 group-hover:opacity-100 shrink-0" />
                               </button>
+                            </td>
+
+                            {/* Store Receiving Stock (Inward arrivals / transfers) */}
+                            <td className="px-3 py-3 text-center bg-teal-50/25 font-bold text-teal-950 text-xs">
+                              <span>
+                                {viewUnit === "pieces"
+                                  ? `${storeReceiving} PCS`
+                                  : `${(storeReceiving / item.case_pack).toFixed(2)} Cs`}
+                              </span>
                             </td>
 
                             {/* Store Closing Stock */}

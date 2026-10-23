@@ -34,6 +34,14 @@ class AdminOpeningStockUpdateRequest(BaseModel):
     date_to: Optional[str] = None
     reason: Optional[str] = "Admin manual opening stock adjustment"
 
+class AdminReceivingStockUpdateRequest(BaseModel):
+    product_id: int
+    location_id: int
+    receiving_stock: int
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    reason: Optional[str] = "Admin manual receiving stock adjustment"
+
 class AdminClosingStockUpdateRequest(BaseModel):
     product_id: int
     location_id: int
@@ -236,10 +244,13 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
     total_catalog_pieces = 0
     total_catalog_revenue = 0.0
     total_opening_stock = 0
+    total_receiving_stock = 0
     total_closing_stock = 0
     total_overall_opening = 0
+    total_overall_receiving = 0
     total_overall_closing = 0
     total_store_opening = 0
+    total_store_receiving = 0
     total_store_closing = 0
     total_store_damaged = 0
     total_overall_damaged = 0
@@ -263,15 +274,22 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
         overall_t_in = fleet_transfer_in_map.get(p.id, 0)
 
         ms_overall = overall_monthly_map.get(p.id)
+        is_overall_receiving_edited = False
+        if ms_overall and ms_overall.is_receiving_manually_edited and ms_overall.manual_receiving_stock is not None:
+            overall_receiving = ms_overall.manual_receiving_stock
+            is_overall_receiving_edited = True
+        else:
+            overall_receiving = overall_t_in
+
         if ms_overall:
             overall_opening = ms_overall.opening_stock
             if ms_overall.is_closing_manually_edited and ms_overall.manual_closing_stock is not None:
                 overall_closing = ms_overall.manual_closing_stock
             else:
-                overall_closing = max(0, overall_opening + overall_t_in - overall_t_out - overall_sold)
+                overall_closing = max(0, overall_opening + overall_receiving - overall_t_out - overall_sold)
         else:
-            overall_opening = max(0, overall_stock_map.get(p.id, 0) + overall_sold + overall_t_out - overall_t_in)
-            overall_closing = max(0, overall_opening + overall_t_in - overall_t_out - overall_sold)
+            overall_opening = max(0, overall_stock_map.get(p.id, 0) + overall_sold + overall_t_out - overall_receiving)
+            overall_closing = max(0, overall_opening + overall_receiving - overall_t_out - overall_sold)
 
         # Individual store numbers:
         # Formula: Closing Stock = Opening Stock + Total Received In - Total Dispatched Out - Total Pieces Sold
@@ -282,6 +300,13 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
         store_damaged = store_damage_map.get(p.id, 0)
 
         ms_store = store_monthly_map.get((target_store_id, p.id)) if target_store_id else None
+        is_store_receiving_edited = False
+        if ms_store and ms_store.is_receiving_manually_edited and ms_store.manual_receiving_stock is not None:
+            store_receiving = ms_store.manual_receiving_stock
+            is_store_receiving_edited = True
+        else:
+            store_receiving = store_transfer_in
+
         is_closing_manually_edited = False
         if ms_store:
             store_opening = ms_store.opening_stock
@@ -289,22 +314,26 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
                 store_closing = ms_store.manual_closing_stock
                 is_closing_manually_edited = True
             else:
-                store_closing = max(0, store_opening + store_transfer_in - store_transfer_out - store_sold)
+                store_closing = max(0, store_opening + store_receiving - store_transfer_out - store_sold)
         else:
-            store_opening = max(0, store_stock_map.get(p.id, 0) + store_sold + store_transfer_out - store_transfer_in)
-            store_closing = max(0, store_opening + store_transfer_in - store_transfer_out - store_sold)
+            store_opening = max(0, store_stock_map.get(p.id, 0) + store_sold + store_transfer_out - store_receiving)
+            store_closing = max(0, store_opening + store_receiving - store_transfer_out - store_sold)
 
         # Active view numbers (based on whether store is selected or overall)
-        closing_stock = store_closing if is_specific_store else overall_closing
         opening_stock = store_opening if is_specific_store else overall_opening
+        receiving_stock = store_receiving if is_specific_store else overall_receiving
+        closing_stock = store_closing if is_specific_store else overall_closing
 
         total_catalog_pieces += pieces_sold
         total_catalog_revenue = round(total_catalog_revenue + revenue, 2)
         total_opening_stock += opening_stock
+        total_receiving_stock += receiving_stock
         total_closing_stock += closing_stock
         total_overall_opening += overall_opening
+        total_overall_receiving += overall_receiving
         total_overall_closing += overall_closing
         total_store_opening += store_opening
+        total_store_receiving += store_receiving
         total_store_closing += store_closing
         total_store_damaged += store_damaged
         total_overall_damaged += overall_damaged
@@ -321,10 +350,13 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
             "selling_rate": selling_rate,
             "case_rate": case_rate,
             "opening_stock": opening_stock,
+            "receiving_stock": receiving_stock,
             "closing_stock": closing_stock,
             "store_opening_stock": store_opening,
+            "store_receiving_stock": store_receiving,
             "store_closing_stock": store_closing,
             "overall_opening_stock": overall_opening,
+            "overall_receiving_stock": overall_receiving,
             "overall_closing_stock": overall_closing,
             "store_pieces_sold": store_sold,
             "overall_pieces_sold": overall_sold,
@@ -336,6 +368,7 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
             "has_sales": pieces_sold > 0,
             "store_damaged": store_damaged,
             "overall_damaged": overall_damaged,
+            "is_receiving_manually_edited": is_store_receiving_edited if is_specific_store else is_overall_receiving_edited,
             "is_closing_manually_edited": is_closing_manually_edited,
         })
 
@@ -348,10 +381,13 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
         "total_pieces": total_catalog_pieces,
         "total_revenue": total_catalog_revenue,
         "total_opening_stock": total_opening_stock,
+        "total_receiving_stock": total_receiving_stock,
         "total_closing_stock": total_closing_stock,
         "overall_opening_stock": total_overall_opening,
+        "overall_receiving_stock": total_overall_receiving,
         "overall_closing_stock": total_overall_closing,
         "store_opening_stock": total_store_opening,
+        "store_receiving_stock": total_store_receiving,
         "store_closing_stock": total_store_closing,
         "total_store_damaged": total_store_damaged,
         "total_overall_damaged": total_overall_damaged,
@@ -621,6 +657,147 @@ def update_admin_opening_stock(
         "location_name": location.name
     }
 
+@router.post("/receiving-stock")
+def update_admin_receiving_stock(
+    req: AdminReceivingStockUpdateRequest,
+    db: Session = Depends(get_db),
+    current_admin: models.Employee = Depends(get_current_active_admin_user),
+):
+    """
+    Manually edits individual store receiving stock (Received In).
+    Any stock received between will be added to receiving stock which will be added to closing stock.
+    Admin can edit it and view individual and overall receiving stock.
+    """
+    if req.receiving_stock < 0:
+        raise HTTPException(status_code=400, detail="Receiving stock cannot be negative")
+
+    product = db.query(models.Product).filter(models.Product.id == req.product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    location = db.query(models.Location).filter(models.Location.id == req.location_id).first()
+    if not location:
+        raise HTTPException(status_code=404, detail="Store location not found")
+
+    year_month = req.date_from[:7] if (req.date_from and len(req.date_from) >= 7) else to_ist(datetime.utcnow()).strftime("%Y-%m")
+
+    # Volume sold at this store during the period
+    sales_q = db.query(func.coalesce(func.sum(models.SaleItem.quantity), 0)).join(models.Sale, models.SaleItem.sale_id == models.Sale.id).filter(
+        models.SaleItem.product_id == req.product_id,
+        models.Sale.location_id == req.location_id,
+    )
+    if req.date_from:
+        try:
+            start_utc = ist_date_to_utc_bounds(req.date_from, is_end_date=False)
+            sales_q = sales_q.filter(models.Sale.sale_date >= start_utc)
+        except Exception:
+            sales_q = sales_q.filter(models.Sale.sale_date >= datetime.fromisoformat(req.date_from))
+    if req.date_to:
+        try:
+            end_utc = ist_date_to_utc_bounds(req.date_to, is_end_date=True)
+            sales_q = sales_q.filter(models.Sale.sale_date <= end_utc)
+        except Exception:
+            sales_q = sales_q.filter(models.Sale.sale_date <= datetime.fromisoformat(req.date_to) + timedelta(days=1))
+    pieces_sold = sales_q.scalar() or 0
+
+    t_out = db.query(func.coalesce(func.sum(models.StockTransfer.dispatched_quantity), 0)).filter(
+        models.StockTransfer.product_id == req.product_id,
+        models.StockTransfer.from_location_id == req.location_id,
+        models.StockTransfer.status == "RECEIVED"
+    ).scalar() or 0
+
+    ms = db.query(models.MonthlyStock).filter(
+        models.MonthlyStock.year_month == year_month,
+        models.MonthlyStock.location_id == req.location_id,
+        models.MonthlyStock.product_id == req.product_id,
+    ).first()
+
+    old_receiving = ms.manual_receiving_stock if (ms and ms.is_receiving_manually_edited) else 0
+
+    if not ms:
+        ms = models.MonthlyStock(
+            year_month=year_month,
+            location_id=req.location_id,
+            product_id=req.product_id,
+            opening_stock=0,
+            manual_receiving_stock=req.receiving_stock,
+            is_receiving_manually_edited=True,
+            receiving_edit_reason=req.reason,
+            is_closing_manually_edited=False,
+        )
+        db.add(ms)
+    else:
+        old_receiving = ms.manual_receiving_stock if ms.is_receiving_manually_edited else 0
+        ms.manual_receiving_stock = req.receiving_stock
+        ms.is_receiving_manually_edited = True
+        ms.receiving_edit_reason = req.reason
+
+    # Formula: Closing Stock = Opening Stock + Receiving Stock - Dispatched Out - Total Pieces Sold
+    # If closing stock was manually edited, keep manual closing stock. Otherwise recalculate.
+    if ms.is_closing_manually_edited and ms.manual_closing_stock is not None:
+        new_closing_stock = ms.manual_closing_stock
+    else:
+        new_closing_stock = max(0, ms.opening_stock + req.receiving_stock - t_out - pieces_sold)
+
+    inv = db.query(models.Inventory).filter(
+        models.Inventory.product_id == req.product_id,
+        models.Inventory.location_id == req.location_id,
+    ).with_for_update().first()
+
+    old_stock = 0
+    if not inv:
+        inv = models.Inventory(
+            product_id=req.product_id,
+            location_id=req.location_id,
+            quantity=new_closing_stock,
+            last_updated=datetime.utcnow()
+        )
+        db.add(inv)
+        db.flush()
+    else:
+        old_stock = inv.quantity
+        inv.quantity = new_closing_stock
+        inv.last_updated = datetime.utcnow()
+
+    diff = new_closing_stock - old_stock
+    txn = models.InventoryTransaction(
+        inventory_id=inv.id,
+        quantity_change=diff,
+        transaction_type="receiving_stock_edit",
+        reference_type="admin_receiving_stock_adjustment",
+        performed_by=current_admin.id
+    )
+    db.add(txn)
+
+    from ..utils.stock_service import log_admin_stock_audit
+    log_admin_stock_audit(
+        db=db,
+        admin_id=current_admin.id,
+        stock_type="STORE_RECEIVING",
+        year_month=year_month,
+        location_id=req.location_id,
+        product_id=req.product_id,
+        previous_value=old_receiving,
+        updated_value=req.receiving_stock,
+        reason=req.reason or "Admin manual receiving stock adjustment",
+    )
+    db.commit()
+
+    case_pack = product.case_pack or 1
+    return {
+        "status": "success",
+        "message": f"Successfully updated receiving stock for [{product.name}] to {req.receiving_stock} PCS at {location.name}. Live closing stock is {new_closing_stock} PCS.",
+        "product_id": product.id,
+        "product_name": product.name,
+        "index_no": product.index_no,
+        "receiving_stock": req.receiving_stock,
+        "closing_stock": new_closing_stock,
+        "closing_cases": new_closing_stock // case_pack,
+        "closing_remainder": new_closing_stock % case_pack,
+        "location_id": location.id,
+        "location_name": location.name
+    }
+
 @router.post("/closing-stock")
 def update_admin_closing_stock(
     req: AdminClosingStockUpdateRequest,
@@ -837,9 +1014,11 @@ def export_admin_sales_index_wise_csv(
         "Sub Category",
         "Case Pack (Pcs)",
         "Store Opening Stock (Pcs)",
+        "Store Receiving Stock (Pcs)",
         "Store Volume Sold (Pcs)",
         "Store Closing Stock (Pcs)",
         "Overall Opening Stock (Pcs)",
+        "Overall Receiving Stock (Pcs)",
         "Overall Closing Stock (Pcs)",
         "Selling Rate / Pc (INR)",
         "Case Rate (INR)",
@@ -857,9 +1036,11 @@ def export_admin_sales_index_wise_csv(
             it["sub_category"],
             it["case_pack"],
             it.get("store_opening_stock", 0),
+            it.get("store_receiving_stock", 0),
             it["total_pieces_sold"],
             it.get("store_closing_stock", 0),
             it.get("overall_opening_stock", 0),
+            it.get("overall_receiving_stock", 0),
             it.get("overall_closing_stock", 0),
             f"{it['selling_rate']:.2f}",
             f"{it['case_rate']:.2f}",
@@ -904,9 +1085,11 @@ def export_admin_sales_xlsx(
         "Sub Category",
         "Case Pack (Pcs)",
         "Store Opening Stock (Pcs)",
+        "Store Receiving Stock (Pcs)",
         "Store Volume Sold (Pcs)",
         "Store Closing Stock (Pcs)",
         "Overall Opening Stock (Pcs)",
+        "Overall Receiving Stock (Pcs)",
         "Overall Closing Stock (Pcs)",
         "Selling Rate / Pc (INR)",
         "Case Rate (INR)",
@@ -925,9 +1108,11 @@ def export_admin_sales_xlsx(
             it["sub_category"],
             it["case_pack"],
             it.get("store_opening_stock", 0),
+            it.get("store_receiving_stock", 0),
             it["total_pieces_sold"],
             it.get("store_closing_stock", 0),
             it.get("overall_opening_stock", 0),
+            it.get("overall_receiving_stock", 0),
             it.get("overall_closing_stock", 0),
             it["selling_rate"],
             it["case_rate"],
@@ -946,9 +1131,11 @@ def export_admin_sales_xlsx(
         f"=SUM(J2:J{total_idx_row-1})",
         f"=SUM(K2:K{total_idx_row-1})",
         f"=SUM(L2:L{total_idx_row-1})",
+        f"=SUM(M2:M{total_idx_row-1})",
+        f"=SUM(N2:N{total_idx_row-1})",
         "", "",
-        f"=SUM(O2:O{total_idx_row-1})",
-        f"=SUM(P2:P{total_idx_row-1})",
+        f"=SUM(Q2:Q{total_idx_row-1})",
+        f"=SUM(R2:R{total_idx_row-1})",
         "",
     ])
 
@@ -958,19 +1145,21 @@ def export_admin_sales_xlsx(
         cell.font = cell.font.copy(bold=True)
 
     ws_index.freeze_panes = "A2"
-    ws_index.auto_filter.ref = f"A1:Q{total_idx_row-1}"
+    ws_index.auto_filter.ref = f"A1:S{total_idx_row-1}"
 
     # Number formats
-    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=8, max_col=12):
+    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=8, max_col=14):
         row[0].number_format = '#,##0'
         row[1].number_format = '#,##0'
         row[2].number_format = '#,##0'
         row[3].number_format = '#,##0'
         row[4].number_format = '#,##0'
-    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=13, max_col=14):
+        row[5].number_format = '#,##0'
+        row[6].number_format = '#,##0'
+    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=15, max_col=16):
         row[0].number_format = '#,##0.00'
         row[1].number_format = '#,##0.00'
-    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=15, max_col=16):
+    for row in ws_index.iter_rows(min_row=2, max_row=total_idx_row, min_col=17, max_col=18):
         row[0].number_format = '#,##0.00'
         row[1].number_format = '#,##0.00'
 

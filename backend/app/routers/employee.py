@@ -341,11 +341,13 @@ def get_employee_sales_dashboard(
     total_my_sold = 0
     total_my_revenue = 0.0
     total_store_opening = 0
+    total_store_receiving = 0
     total_store_closing = 0
     total_store_sold = 0
     total_store_revenue = 0.0
     total_store_damaged = 0
     total_overall_opening = 0
+    total_overall_receiving = 0
     total_overall_closing = 0
     total_overall_sold = 0
     total_overall_revenue = 0.0
@@ -370,15 +372,20 @@ def get_employee_sales_dashboard(
         store_transfer_in = store_transfer_in_map.get(p.id, 0)
 
         ms_store = store_monthly_map.get(p.id)
+        if ms_store and ms_store.is_receiving_manually_edited and ms_store.manual_receiving_stock is not None:
+            store_receiving = ms_store.manual_receiving_stock
+        else:
+            store_receiving = store_transfer_in
+
         if ms_store:
             store_opening = ms_store.opening_stock
             if ms_store.is_closing_manually_edited and ms_store.manual_closing_stock is not None:
                 store_closing = ms_store.manual_closing_stock
             else:
-                store_closing = max(0, store_opening + store_transfer_in - store_transfer_out - store_sold)
+                store_closing = max(0, store_opening + store_receiving - store_transfer_out - store_sold)
         else:
-            store_opening = max(0, store_stock_map.get(p.id, 0) + store_sold + store_transfer_out - store_transfer_in)
-            store_closing = max(0, store_opening + store_transfer_in - store_transfer_out - store_sold)
+            store_opening = max(0, store_stock_map.get(p.id, 0) + store_sold + store_transfer_out - store_receiving)
+            store_closing = max(0, store_opening + store_receiving - store_transfer_out - store_sold)
 
         s_rev = round(store_sold * rate, 2)
 
@@ -389,15 +396,20 @@ def get_employee_sales_dashboard(
         overall_t_in = fleet_transfer_in_map.get(p.id, 0)
 
         ms_overall = overall_monthly_map.get(p.id)
+        if ms_overall and ms_overall.is_receiving_manually_edited and ms_overall.manual_receiving_stock is not None:
+            overall_receiving = ms_overall.manual_receiving_stock
+        else:
+            overall_receiving = overall_t_in
+
         if ms_overall:
             overall_opening = ms_overall.opening_stock
             if ms_overall.is_closing_manually_edited and ms_overall.manual_closing_stock is not None:
                 overall_closing = ms_overall.manual_closing_stock
             else:
-                overall_closing = max(0, overall_opening + overall_t_in - overall_t_out - overall_sold)
+                overall_closing = max(0, overall_opening + overall_receiving - overall_t_out - overall_sold)
         else:
-            overall_opening = max(0, overall_stock_map.get(p.id, 0) + overall_sold + overall_t_out - overall_t_in)
-            overall_closing = max(0, overall_opening + overall_t_in - overall_t_out - overall_sold)
+            overall_opening = max(0, overall_stock_map.get(p.id, 0) + overall_sold + overall_t_out - overall_receiving)
+            overall_closing = max(0, overall_opening + overall_receiving - overall_t_out - overall_sold)
 
         o_rev = round(overall_sold * rate, 2)
 
@@ -432,11 +444,13 @@ def get_employee_sales_dashboard(
         total_my_revenue = round(total_my_revenue + my_rev, 2)
 
         total_store_opening += store_opening
+        total_store_receiving += store_receiving
         total_store_closing += store_closing
         total_store_sold += store_sold
         total_store_revenue = round(total_store_revenue + s_rev, 2)
 
         total_overall_opening += overall_opening
+        total_overall_receiving += overall_receiving
         total_overall_closing += overall_closing
         total_overall_sold += overall_sold
         total_overall_revenue = round(total_overall_revenue + o_rev, 2)
@@ -460,6 +474,7 @@ def get_employee_sales_dashboard(
 
             # Individual Store Stock & Sales (for active/selected store)
             "store_opening_stock": store_opening,
+            "store_receiving_stock": store_receiving,
             "store_closing_stock": store_closing,
             "store_closing_cases": store_closing // pack,
             "store_closing_remainder": store_closing % pack,
@@ -469,6 +484,7 @@ def get_employee_sales_dashboard(
 
             # Overall Stock & Sales (hidden from non-admin employee portal)
             "overall_opening_stock": overall_opening if current_user.role == "admin" else 0,
+            "overall_receiving_stock": overall_receiving if current_user.role == "admin" else 0,
             "overall_closing_stock": overall_closing if current_user.role == "admin" else 0,
             "overall_closing_cases": (overall_closing // pack) if current_user.role == "admin" else 0,
             "overall_closing_remainder": (overall_closing % pack) if current_user.role == "admin" else 0,
@@ -481,6 +497,7 @@ def get_employee_sales_dashboard(
             "cases_sold": round(my_sold / pack, 2),
             "revenue": my_rev,
             "opening_stock": store_opening,
+            "receiving_stock": store_receiving,
             "closing_stock": store_closing,
             "closing_cases": store_closing // pack,
             "closing_remainder": store_closing % pack,
@@ -557,12 +574,14 @@ def get_employee_sales_dashboard(
 
             # Individual Store Stock & Sales (Selected Store)
             "store_opening_stock": total_store_opening,
+            "store_receiving_stock": total_store_receiving,
             "store_closing_stock": total_store_closing,
             "store_pieces_sold": total_store_sold,
             "store_revenue": total_store_revenue,
 
             # Overall Network Stock & Sales (hidden from non-admin employees)
             "overall_opening_stock": total_overall_opening if current_user.role == "admin" else 0,
+            "overall_receiving_stock": total_overall_receiving if current_user.role == "admin" else 0,
             "overall_closing_stock": total_overall_closing if current_user.role == "admin" else 0,
             "overall_pieces_sold": total_overall_sold if current_user.role == "admin" else 0,
             "overall_revenue": total_overall_revenue if current_user.role == "admin" else 0.0,
@@ -571,6 +590,7 @@ def get_employee_sales_dashboard(
             "total_pieces_sold": total_my_sold,
             "total_revenue": total_my_revenue,
             "total_opening_stock": total_store_opening,
+            "total_receiving_stock": total_store_receiving,
             "total_closing_stock": total_store_closing,
             "total_store_damaged": total_store_damaged,
             "total_overall_damaged": total_overall_damaged if current_user.role == "admin" else 0,

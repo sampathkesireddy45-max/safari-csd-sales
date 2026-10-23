@@ -471,6 +471,13 @@ export const updateAdminOpeningStock = async (payload) => {
   });
 };
 
+export const updateAdminReceivingStock = async (payload) => {
+  return await fetchApi("/admin/dashboard/receiving-stock", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+};
+
 export const updateAdminClosingStock = async (payload) => {
   return await fetchApi("/admin/dashboard/closing-stock", {
     method: "POST",

@@ -30,6 +30,7 @@ import {
   PackagePlus,
   Globe2,
   ChevronDown,
+  ArrowDownToLine,
 } from "lucide-react";
 import StockEntryModal from "../components/StockEntryModal";
 import {
@@ -42,6 +43,7 @@ import {
   updateSale,
   deleteSale,
   updateAdminOpeningStock,
+  updateAdminReceivingStock,
   updateAdminClosingStock,
   triggerStockRollover,
 } from "../services/api";
@@ -90,6 +92,13 @@ const AdminSales = () => {
   const [editOpeningLocationId, setEditOpeningLocationId] = useState("");
   const [newOpeningStockValue, setNewOpeningStockValue] = useState("");
   const [savingOpeningStock, setSavingOpeningStock] = useState(false);
+
+  // Admin Edit Receiving Stock Modal State (Admin Only Permission)
+  const [editingReceivingStock, setEditingReceivingStock] = useState(null);
+  const [editReceivingLocationId, setEditReceivingLocationId] = useState("");
+  const [newReceivingStockValue, setNewReceivingStockValue] = useState("");
+  const [receivingReason, setReceivingReason] = useState("");
+  const [savingReceivingStock, setSavingReceivingStock] = useState(false);
 
   // Admin Edit Closing Stock Modal State (Admin Only Permission)
   const [editingClosingStock, setEditingClosingStock] = useState(null);
@@ -288,6 +297,66 @@ const AdminSales = () => {
     }
   };
 
+  // Admin Receiving Stock Modal Handlers
+  const handleOpenEditReceivingModal = (item) => {
+    const defaultLocId =
+      selectedLocation && selectedLocation !== "all"
+        ? parseInt(selectedLocation, 10)
+        : locations[0]?.id || 1;
+
+    setEditingReceivingStock(item);
+    setEditReceivingLocationId(defaultLocId);
+    const initialReceiving =
+      selectedLocation && selectedLocation !== "all"
+        ? item.store_receiving_stock ?? item.receiving_stock ?? 0
+        : item.overall_receiving_stock ?? item.receiving_stock ?? 0;
+    setNewReceivingStockValue(String(initialReceiving));
+    setReceivingReason("Inward receiving stock adjustment");
+  };
+
+  const handleCloseEditReceivingModal = () => {
+    setEditingReceivingStock(null);
+    setEditReceivingLocationId("");
+    setNewReceivingStockValue("");
+    setReceivingReason("");
+  };
+
+  const handleSaveReceivingStock = async (e) => {
+    e.preventDefault();
+    if (!editingReceivingStock || !editReceivingLocationId) {
+      addToast("Please select a target store counter location", "error");
+      return;
+    }
+    const val = parseInt(newReceivingStockValue, 10);
+    if (isNaN(val) || val < 0) {
+      addToast("Please enter a valid non-negative receiving stock", "error");
+      return;
+    }
+
+    setSavingReceivingStock(true);
+    try {
+      const res = await updateAdminReceivingStock({
+        product_id: editingReceivingStock.product_id,
+        location_id: editReceivingLocationId,
+        receiving_stock: val,
+        reason: receivingReason || "Admin manual receiving stock adjustment",
+      });
+      const targetStore = locations.find((l) => l.id === editReceivingLocationId);
+      addToast(
+        res.message ||
+          `Receiving stock for Index #${editingReceivingStock.index_no} at ${targetStore?.name || "Store"} updated to ${val} PCS!`,
+        "success"
+      );
+      handleCloseEditReceivingModal();
+      await loadSales();
+    } catch (err) {
+      console.error("Failed to update receiving stock:", err);
+      addToast(err.message || "Failed to update receiving stock", "error");
+    } finally {
+      setSavingReceivingStock(false);
+    }
+  };
+
   // Admin Closing Stock Modal Handlers
   const handleOpenEditClosingModal = (item) => {
     const defaultLocId =
@@ -413,10 +482,13 @@ const AdminSales = () => {
     return filteredIndexSales.reduce(
       (acc, item) => {
         acc.store_opening += item.store_opening_stock ?? 0;
+        acc.store_receiving += item.store_receiving_stock ?? 0;
         acc.store_closing += item.store_closing_stock ?? 0;
         acc.overall_opening += item.overall_opening_stock ?? item.opening_stock ?? 0;
+        acc.overall_receiving += item.overall_receiving_stock ?? item.receiving_stock ?? 0;
         acc.overall_closing += item.overall_closing_stock ?? item.closing_stock ?? 0;
         acc.opening += item.opening_stock || 0;
+        acc.receiving += item.receiving_stock || 0;
         acc.closing += item.closing_stock || 0;
         acc.pieces += item.total_pieces_sold;
         acc.cases += item.total_cases_sold;
@@ -427,10 +499,13 @@ const AdminSales = () => {
       },
       {
         store_opening: 0,
+        store_receiving: 0,
         store_closing: 0,
         overall_opening: 0,
+        overall_receiving: 0,
         overall_closing: 0,
         opening: 0,
+        receiving: 0,
         closing: 0,
         pieces: 0,
         cases: 0,
@@ -751,7 +826,7 @@ const AdminSales = () => {
         </div>
 
         {/* Top Metric Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
           <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">
@@ -773,6 +848,32 @@ const AdminSales = () => {
               {selectedLocation !== "all" && (
                 <span className="font-semibold text-amber-900 bg-amber-100/70 px-1.5 py-0.5 rounded text-[10px]">
                   Overall: {(summary.index_summary?.overall_opening_stock ?? indexViewTotals.overall_opening).toLocaleString()} PCS
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-teal-200 bg-gradient-to-br from-teal-50 to-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-teal-700">
+                {selectedLocation !== "all" ? "Store Receiving Stock" : "Overall Receiving Stock"}
+              </span>
+              <div className="w-8 h-8 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center font-bold text-sm">
+                <ArrowDownToLine className="w-4 h-4" />
+              </div>
+            </div>
+            <p className="mt-3 text-3xl font-black text-teal-950">
+              {(selectedLocation !== "all"
+                ? (summary.index_summary?.store_receiving_stock ?? indexViewTotals.store_receiving)
+                : (summary.index_summary?.overall_receiving_stock ?? summary.index_summary?.total_receiving_stock ?? indexViewTotals.overall_receiving)
+              ).toLocaleString("en-IN")}{" "}
+              <span className="text-xs font-bold text-teal-600">PCS</span>
+            </p>
+            <div className="mt-1 flex items-center justify-between text-xs text-teal-700">
+              <span>{selectedLocation !== "all" ? "Inward arrivals / transfers" : "All inward stock across stores"}</span>
+              {selectedLocation !== "all" && (
+                <span className="font-semibold text-teal-900 bg-teal-100/70 px-1.5 py-0.5 rounded text-[10px]">
+                  Overall: {(summary.index_summary?.overall_receiving_stock ?? indexViewTotals.overall_receiving).toLocaleString()} PCS
                 </span>
               )}
             </div>
@@ -1048,6 +1149,10 @@ const AdminSales = () => {
                             Store Opening
                             <span className="block text-[9px] font-normal text-blue-700 lowercase">(selected store)</span>
                           </th>
+                          <th className="px-3 py-3 text-right bg-teal-50/80 text-teal-950">
+                            Store Receiving
+                            <span className="block text-[9px] font-normal text-teal-700 lowercase">(inward stock)</span>
+                          </th>
                           <th className="px-3 py-3 text-right bg-indigo-50/80 text-indigo-950">
                             Store Sold
                           </th>
@@ -1062,6 +1167,10 @@ const AdminSales = () => {
                       <th className="px-3 py-3 text-right bg-amber-50/70 text-amber-950 border-l border-amber-200">
                         Overall Opening
                         <span className="block text-[9px] font-normal text-amber-700 lowercase">(all 8 stores)</span>
+                      </th>
+                      <th className="px-3 py-3 text-right bg-teal-50/70 text-teal-950">
+                        Overall Receiving
+                        <span className="block text-[9px] font-normal text-teal-700 lowercase">(all 8 stores)</span>
                       </th>
                       <th className="px-3 py-3 text-right bg-indigo-50/70 text-indigo-950">
                         {selectedLocation !== "all" ? "Total Sold" : "Volume Sold"}
@@ -1081,9 +1190,11 @@ const AdminSales = () => {
                       const hasSold = item.total_pieces_sold > 0;
                       const storeClosing = item.store_closing_stock ?? item.closing_stock ?? 0;
                       const storeOpening = item.store_opening_stock ?? item.opening_stock ?? 0;
+                      const storeReceiving = item.store_receiving_stock ?? item.receiving_stock ?? 0;
                       const storeSold = item.store_pieces_sold ?? item.total_pieces_sold ?? 0;
                       const overallClosing = item.overall_closing_stock ?? item.closing_stock ?? 0;
                       const overallOpening = item.overall_opening_stock ?? item.opening_stock ?? 0;
+                      const overallReceiving = item.overall_receiving_stock ?? item.receiving_stock ?? 0;
                       const overallSold = item.overall_pieces_sold ?? item.total_pieces_sold ?? 0;
 
                       return (
@@ -1124,6 +1235,23 @@ const AdminSales = () => {
                                     onClick={() => handleOpenEditOpeningModal(item)}
                                     className="p-1 rounded-md text-blue-700 hover:text-blue-900 hover:bg-blue-100 transition"
                                     title={`Edit Store Opening Stock for Index #${item.index_no}`}
+                                  >
+                                    <Edit3 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-mono font-bold bg-teal-50/30 text-teal-950 whitespace-nowrap">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <span>
+                                    {viewUnit === "cases"
+                                      ? `${(storeReceiving / item.case_pack).toFixed(1)} Cs`
+                                      : `${storeReceiving} PCS`}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditReceivingModal(item)}
+                                    className="p-1 rounded-md text-teal-700 hover:text-teal-900 hover:bg-teal-100 transition"
+                                    title={`Edit Store Receiving Stock for Index #${item.index_no}`}
                                   >
                                     <Edit3 className="w-3 h-3" />
                                   </button>
@@ -1180,6 +1308,25 @@ const AdminSales = () => {
                               )}
                             </div>
                           </td>
+                          <td className="px-3 py-2.5 text-right font-mono font-bold bg-teal-50/30 text-teal-950 whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <span>
+                                {viewUnit === "cases"
+                                  ? `${(overallReceiving / item.case_pack).toFixed(1)} Cs`
+                                  : `${overallReceiving} PCS`}
+                              </span>
+                              {selectedLocation === "all" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditReceivingModal(item)}
+                                  className="p-1 rounded-md text-teal-700 hover:text-teal-900 hover:bg-teal-100 transition"
+                                  title={`Edit Store Receiving Stock for Index #${item.index_no}`}
+                                >
+                                  <Edit3 className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-3 py-2.5 text-right font-mono font-black bg-indigo-50/40 whitespace-nowrap">
                             {overallSold > 0 ? (
                               <span className="text-emerald-700 text-sm">
@@ -1219,6 +1366,15 @@ const AdminSales = () => {
                               >
                                 <Edit3 className="w-3 h-3" />
                                 <span>Edit Opening</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditReceivingModal(item)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 transition border border-teal-200"
+                                title="Adjust inward receiving stock"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>Edit Receiving</span>
                               </button>
                               <button
                                 type="button"
@@ -1266,6 +1422,11 @@ const AdminSales = () => {
                               ? `${(indexViewTotals.store_opening / (indexViewTotals.cases || 1)).toFixed(1)} Cs`
                               : `${indexViewTotals.store_opening} PCS`}
                           </td>
+                          <td className="px-3 py-3 text-right font-black text-teal-900 whitespace-nowrap">
+                            {viewUnit === "cases"
+                              ? `${(indexViewTotals.store_receiving / (indexViewTotals.cases || 1)).toFixed(1)} Cs`
+                              : `${indexViewTotals.store_receiving} PCS`}
+                          </td>
                           <td className="px-3 py-3 text-right font-black text-indigo-900 whitespace-nowrap">
                             {viewUnit === "cases"
                               ? `${((summary.overall?.total_pieces || 0) / 4).toFixed(1)} Cs`
@@ -1282,6 +1443,11 @@ const AdminSales = () => {
                         {viewUnit === "cases"
                           ? `${(indexViewTotals.overall_opening / (indexViewTotals.cases || 1)).toFixed(1)} Cs`
                           : `${indexViewTotals.overall_opening} PCS`}
+                      </td>
+                      <td className="px-3 py-3 text-right font-black text-teal-900 whitespace-nowrap">
+                        {viewUnit === "cases"
+                          ? `${(indexViewTotals.overall_receiving / (indexViewTotals.cases || 1)).toFixed(1)} Cs`
+                          : `${indexViewTotals.overall_receiving} PCS`}
                       </td>
                       <td className="px-3 py-3 text-right font-black text-indigo-900 whitespace-nowrap">
                         {viewUnit === "cases"
@@ -2003,6 +2169,135 @@ const AdminSales = () => {
                     </>
                   ) : (
                     <span>Save Store Opening Stock</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: EDIT RECEIVING STOCK (ADMIN ONLY) ================= */}
+      {editingReceivingStock && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-teal-100 text-teal-700">
+                  <ArrowDownToLine className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">
+                    Edit Store Receiving Stock (Admin)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Index #{editingReceivingStock.index_no} • Inward received stock adjustments recalculate closing stock
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseEditReceivingModal}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveReceivingStock} className="space-y-4">
+              {/* Product Info Box */}
+              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Selected Item
+                </span>
+                <p className="text-sm font-bold text-slate-900">
+                  {editingReceivingStock.name}
+                </p>
+                <div className="text-xs text-slate-500 flex items-center justify-between pt-2 border-t border-slate-200">
+                  <span>
+                    Selling Rate: <strong className="text-emerald-700 font-mono">₹{editingReceivingStock.selling_rate}</strong>
+                  </span>
+                  <span>
+                    Case Pack: <strong>{editingReceivingStock.case_pack} pcs/cs</strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Target Store Location Picker */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                  Target Store Counter Location <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={editReceivingLocationId || ""}
+                  onChange={(e) => setEditReceivingLocationId(parseInt(e.target.value, 10))}
+                  className="w-full text-sm font-semibold px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none text-slate-900 bg-white"
+                  required
+                >
+                  {locations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Input for Manual Receiving Stock */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                  Inward Receiving Stock (Pieces) <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={newReceivingStockValue}
+                  onChange={(e) => setNewReceivingStockValue(e.target.value)}
+                  className="w-full text-lg font-bold px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none text-slate-900"
+                  required
+                  autoFocus
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Adjusting receiving stock updates live store receiving and recalculates Closing Stock = Opening + Receiving - Dispatched - Sold.
+                </p>
+              </div>
+
+              {/* Audit Reason Input */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                  Audit Reason for Adjustment <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={receivingReason}
+                  onChange={(e) => setReceivingReason(e.target.value)}
+                  placeholder="e.g. Inward stock delivery arrival verification"
+                  className="w-full text-xs font-medium px-3.5 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none text-slate-900"
+                  required
+                />
+              </div>
+
+              {/* Form Action Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={handleCloseEditReceivingModal}
+                  disabled={savingReceivingStock}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingReceivingStock}
+                  className="px-5 py-2.5 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 rounded-xl shadow-md shadow-teal-600/30 transition flex items-center gap-2"
+                >
+                  {savingReceivingStock ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving Receiving Stock...</span>
+                    </>
+                  ) : (
+                    <span>Save Receiving Stock</span>
                   )}
                 </button>
               </div>
