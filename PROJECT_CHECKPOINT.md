@@ -5,22 +5,16 @@
 
 ---
 
-## 🚚 Inter-Store Stock Transfer System (Completed October 23, 2026)
-- **Problem Solved**: Canteen counters often run out of high-demand Safari SKUs while sister canteens have excess inventory (>15 pcs). Previously required phone calls and manual tallying.
-- **Complete Architecture Implemented**:
-  - **Database Model (`backend/app/models/stock_transfer.py`)**:
-    - `StockTransfer` table with `transfer_number` (`TR-YYYYMMDD-XXXX`), `from_location_id`, `to_location_id`, `product_id`, `quantity`, `status` (`IN_TRANSIT`, `RECEIVED`, `CANCELLED`), `initiated_by_id`, `received_by_id`, `notes`, and audit timestamps.
-  - **Transactional Stock Balancing (`backend/app/routers/stock_transfer.py`)**:
-    - **Dispatch (`POST /transfers/`)**: Validates available pieces at source store; automatically deducts pieces from source store and writes `transfer_out` audit transaction.
-    - **Receipt (`POST /transfers/{id}/receive`)**: Receiving canteen staff or Admin confirms delivery with 1 click; automatically credits pieces to destination store inventory and writes `transfer_in` audit transaction.
-    - **Cancellation (`POST /transfers/{id}/cancel`)**: Sender or Admin cancels an in-transit transfer; pieces immediately return to source store with `transfer_cancel` transaction.
-  - **Full-Featured Frontend UI (`frontend/src/pages/StockTransfers.jsx`)**:
-    - Status tabs (`All`, `In Transit 🚚`, `Received ✅`, `Cancelled ❌`), live search, and metric cards (`In Transit On Road`, `Completed Deliveries`, `Total Pieces Rebalanced`).
-    - Dedicated dispatch modal with live source store piece availability indicator and validation.
-    - Prominent action buttons for receiving store staff ("Confirm Received") and senders ("Cancel").
-  - **Navigation Integration**:
-    - Added to `Sidebar.jsx` for both Admin and Staff with `ArrowLeftRight` icon.
-    - Quick dispatch buttons added to `AdminDashboard.jsx` and `EmployeeDashboard.jsx`.
+## 🚚 Admin-Ordered Inter-Store Stock Transfer & Counter Staff Workflow (October 23, 2026)
+- **Role Enforcement & Security Architecture**:
+  - **Admin-Only Transfer Creation**: Only administrators can configure, order, or adjust inter-store stock transfers (`Depends(get_current_active_admin_user)`). The "New Stock Transfer" button and configuration modal are strictly hidden and blocked from employee accounts.
+  - **Dual Counter Staff Workflow**:
+    1. **Admin Orders Transfer**: Admin selects sending canteen, receiving canteen, Safari SKU, and quantity. Admin modal provides an instant live breakdown of **Pieces and Equivalent Cases** (e.g. `12 Pieces = 3 Cases`). Transfer is created in `PENDING_DISPATCH` state (or instant `IN_TRANSIT` if admin chooses auto-dispatch).
+    2. **Sending Counter Staff**: Sees only outgoing transfers from their store. A prominent button allows them to click: **`🚚 Click to Confirm Sent: {quantity} Pieces ({cases_display})`**. Clicking it deducts stock from their counter and sets status to `IN_TRANSIT`.
+    3. **Receiving Counter Staff**: Sees only incoming transfers destined for their store. A prominent button allows them to click: **`✅ Click to Confirm Received: {quantity} Pieces ({cases_display})`**. Clicking it credits stock to their counter and sets status to `RECEIVED`.
+  - **Full Audit Logging**:
+    - Tracks `initiated_by_name` (Admin), `sent_by_name` (Sending store employee), and `received_by_name` (Receiving store employee) with timestamps.
+    - Preserves mathematical reconciliation: $\text{Store Opening} = \text{Closing} + \text{Sold} + \text{Transfers Out} - \text{Transfers In}$.
 
 ---
 
