@@ -16,10 +16,10 @@ def get_employees(db: Session, skip: int = 0, limit: int = 100, status: str = No
 def create_employee(db: Session, employee: schemas.EmployeeCreate):
     data = employee.dict()
     password = data.pop("password", None)
-    if not password or len(password.strip()) < 8:
-        raise ValueError("A password of at least 8 characters is required")
+    if not password or len(str(password).strip()) < 4:
+        raise ValueError("A password of at least 4 characters is required")
     db_employee = models.Employee(**data)
-    db_employee.set_password(password)
+    db_employee.set_password(str(password).strip())
     db.add(db_employee)
     db.commit()
     db.refresh(db_employee)
@@ -27,13 +27,13 @@ def create_employee(db: Session, employee: schemas.EmployeeCreate):
 
 def reactivate_employee(db: Session, employee: models.Employee, employee_data: schemas.EmployeeCreate):
     password = employee_data.password
-    if not password or len(password.strip()) < 8:
-        raise ValueError("A password of at least 8 characters is required")
+    if not password or len(str(password).strip()) < 4:
+        raise ValueError("A password of at least 4 characters is required")
     data = employee_data.dict(exclude={"password"})
     for key, value in data.items():
         setattr(employee, key, value)
     employee.status = "active"
-    employee.set_password(password.strip())
+    employee.set_password(str(password).strip())
     db.commit()
     db.refresh(employee)
     return employee
@@ -43,10 +43,11 @@ def update_employee(db: Session, employee_id: int, employee: schemas.EmployeeUpd
     if db_employee:
         update_data = employee.dict(exclude_unset=True)
         password = update_data.pop("password", None)
-        if password:
-            db_employee.set_password(password)
+        if password and str(password).strip():
+            db_employee.set_password(str(password).strip())
         for key, value in update_data.items():
-            setattr(db_employee, key, value)
+            if key != "password":
+                setattr(db_employee, key, value)
         db.commit()
         db.refresh(db_employee)
     return db_employee

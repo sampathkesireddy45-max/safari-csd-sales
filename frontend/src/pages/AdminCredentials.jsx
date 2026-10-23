@@ -20,7 +20,8 @@ import {
   Share2,
   X,
   AlertCircle,
-  Trash2
+  Trash2,
+  CheckCircle
 } from "lucide-react";
 
 const AdminCredentials = () => {
@@ -36,9 +37,12 @@ const AdminCredentials = () => {
   const [showPlainPassword, setShowPlainPassword] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
   const [removingEmployeeId, setRemovingEmployeeId] = useState(null);
+  const [passwordSuccessData, setPasswordSuccessData] = useState(null);
+  const [sessionPasswords, setSessionPasswords] = useState({});
 
   // Copied state indicator
   const [copiedId, setCopiedId] = useState(null);
+  const [copiedField, setCopiedField] = useState(null);
 
   // Add Employee Modal
   const [showAddModal, setShowAddModal] = useState(false);
@@ -82,7 +86,8 @@ const AdminCredentials = () => {
 
   const handleOpenPasswordModal = (emp) => {
     setSelectedEmployee(emp);
-    setNewPassword(generateRandomPassword());
+    setPasswordSuccessData(null);
+    setNewPassword(sessionPasswords[emp.id] || generateRandomPassword());
     setShowPlainPassword(true);
     setShowPasswordModal(true);
   };
@@ -90,24 +95,49 @@ const AdminCredentials = () => {
   const handleClosePasswordModal = () => {
     setShowPasswordModal(false);
     setSelectedEmployee(null);
+    setPasswordSuccessData(null);
     setNewPassword("");
+  };
+
+  const handleCopyJustPassword = (pwd, empId = null) => {
+    if (!pwd) return;
+    navigator.clipboard.writeText(pwd);
+    setCopiedField(`pwd-${empId || "modal"}`);
+    addToast("Password copied to clipboard!", "success");
+    setTimeout(() => setCopiedField(null), 3000);
+  };
+
+  const handleCopyUserId = (userId) => {
+    if (!userId) return;
+    navigator.clipboard.writeText(userId);
+    setCopiedField(`user-${userId}`);
+    addToast(`User ID ${userId} copied!`, "success");
+    setTimeout(() => setCopiedField(null), 3000);
   };
 
   const handleSavePassword = async (e) => {
     e.preventDefault();
-    if (!newPassword || newPassword.trim().length < 4) {
+    const cleanPassword = (newPassword || "").trim();
+    if (!cleanPassword || cleanPassword.length < 4) {
       addToast("Password must be at least 4 characters long", "error");
       return;
     }
 
     setSavingPassword(true);
     try {
-      await resetEmployeePassword(selectedEmployee.id, newPassword.trim());
+      await resetEmployeePassword(selectedEmployee.id, cleanPassword);
+      setSessionPasswords((prev) => ({
+        ...prev,
+        [selectedEmployee.id]: cleanPassword,
+        [selectedEmployee.employee_id]: cleanPassword,
+      }));
+
+      setPasswordSuccessData({
+        employee: selectedEmployee,
+        password: cleanPassword,
+      });
+
       addToast(`Password updated for ${selectedEmployee.name} (${selectedEmployee.employee_id})!`, "success");
-      
-      // Auto-copy the credential slip for the admin
-      handleCopyCredentials(selectedEmployee, newPassword.trim());
-      handleClosePasswordModal();
       loadData();
     } catch (err) {
       console.error("Failed to set password:", err);
@@ -117,15 +147,16 @@ const AdminCredentials = () => {
     }
   };
 
-  const handleCopyCredentials = (emp, pwd = "[Admin Configured Password]") => {
+  const handleCopyCredentials = (emp, pwd = null) => {
     const loc = locations.find((l) => l.id === emp.assigned_location_id);
+    const effectivePwd = pwd || sessionPasswords[emp.id] || sessionPasswords[emp.employee_id] || "[Admin Configured Password]";
     const slip = `=====================================
 SAFARI STAFF PORTAL LOGIN ACCESS
 =====================================
 Staff Member : ${emp.name}
 User ID (Login) : ${emp.employee_id}
 Work Email   : ${emp.email}
-Password     : ${pwd}
+Password     : ${effectivePwd}
 Assigned Store: ${loc ? loc.name : "Safari Operations"}
 Portal URL   : ${window.location.origin}/login
 =====================================
@@ -133,7 +164,7 @@ Please log in using your User ID and the password above.`;
 
     navigator.clipboard.writeText(slip);
     setCopiedId(emp.id);
-    addToast(`Credentials for ${emp.employee_id} copied to clipboard!`, "success");
+    addToast(`Login memo for ${emp.employee_id} copied to clipboard!`, "success");
     setTimeout(() => setCopiedId(null), 3000);
   };
 
@@ -325,27 +356,43 @@ Please log in using your User ID and the password above.`;
 
                         <td className="px-6 py-4 text-right">
                           <div className="flex items-center justify-end gap-2">
-                            {/* Copy Pass button */}
-                            <button
-                              type="button"
-                              onClick={() => handleCopyCredentials(emp)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:text-indigo-700 bg-slate-100 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 transition"
-                              title="Copy User ID & Login slip to clipboard"
-                            >
-                              {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                              <span>{isCopied ? "Copied!" : "Copy Pass"}</span>
-                            </button>
+                            {sessionPasswords[emp.id] ? (
+                              <button
+                                type="button"
+                                onClick={() => handleCopyJustPassword(sessionPasswords[emp.id], emp.id)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition"
+                                title={`Copy active password: ${sessionPasswords[emp.id]}`}
+                              >
+                                {copiedField === `pwd-${emp.id}` ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Key className="w-3.5 h-3.5 text-emerald-600" />}
+                                <span>{copiedField === `pwd-${emp.id}` ? "Copied!" : "Copy Pass"}</span>
+                              </button>
+                            ) : null}
 
-                            {/* Set Password button */}
+                            {/* Set / Change Password button */}
                             <button
                               type="button"
                               onClick={() => handleOpenPasswordModal(emp)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition"
-                              title="Set or reset password"
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold shadow-sm transition ${
+                                sessionPasswords[emp.id]
+                                  ? "text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200"
+                                  : "text-white bg-indigo-600 hover:bg-indigo-700"
+                              }`}
+                              title="Set or change password"
                             >
                               <Key className="w-3.5 h-3.5" />
-                              <span>Set Password</span>
+                              <span>{sessionPasswords[emp.id] ? "Change" : "Set Password"}</span>
                             </button>
+
+                            {/* Copy Full Memo Slip */}
+                            <button
+                              type="button"
+                              onClick={() => handleCopyCredentials(emp)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 transition"
+                              title="Copy complete staff login slip memo"
+                            >
+                              <Share2 className="w-3.5 h-3.5" />
+                            </button>
+
                             {emp.role !== "admin" && (
                               <button
                                 type="button"
@@ -377,7 +424,7 @@ Please log in using your User ID and the password above.`;
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <Key className="w-5 h-5 text-indigo-600" />
-                <span>Configure Employee Password</span>
+                <span>{passwordSuccessData ? "Password Updated Successfully" : "Configure Employee Password"}</span>
               </h3>
               <button
                 onClick={handleClosePasswordModal}
@@ -387,82 +434,168 @@ Please log in using your User ID and the password above.`;
               </button>
             </div>
 
-            <form onSubmit={handleSavePassword} className="mt-4 space-y-4">
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-                <div className="text-xs text-slate-500">Configuring credentials for:</div>
-                <div className="text-sm font-bold text-slate-900 mt-0.5">
-                  {selectedEmployee.name}
+            {passwordSuccessData ? (
+              <div className="mt-4 space-y-4">
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-center">
+                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-2">
+                    <CheckCircle className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-sm font-bold text-emerald-950">Active & Ready for Login</h4>
+                  <p className="text-xs text-emerald-700 mt-1">
+                    The changed password has been committed to the database. Staff can log in immediately.
+                  </p>
                 </div>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-xs text-slate-500">User ID:</span>
-                  <span className="font-mono text-xs font-bold text-indigo-700 bg-white px-2 py-0.5 rounded border border-slate-200">
-                    {selectedEmployee.employee_id}
+
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-[11px] text-slate-400 uppercase font-semibold">User ID (Login)</div>
+                      <div className="font-mono text-sm font-bold text-slate-900 mt-0.5">
+                        {passwordSuccessData.employee.employee_id}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyUserId(passwordSuccessData.employee.employee_id)}
+                      className="px-2.5 py-1 text-xs font-semibold text-indigo-700 bg-white hover:bg-indigo-50 border border-slate-200 rounded-lg flex items-center gap-1 shadow-sm transition"
+                    >
+                      {copiedField === `user-${passwordSuccessData.employee.employee_id}` ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy ID</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="border-t border-slate-200/80 pt-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-[11px] text-slate-400 uppercase font-semibold">New Password</div>
+                      <div className="font-mono text-sm font-bold text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-200 inline-block mt-0.5">
+                        {passwordSuccessData.password}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyJustPassword(passwordSuccessData.password, "modal")}
+                      className="px-3 py-1 text-xs font-semibold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded-lg flex items-center gap-1.5 shadow-sm transition"
+                    >
+                      {copiedField === "pwd-modal" ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-700" />
+                          <span>Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy Password</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-3 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCredentials(passwordSuccessData.employee, passwordSuccessData.password)}
+                    className="w-full py-2.5 px-4 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center justify-center gap-2 border border-slate-200"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>Copy Full Login Slip Memo (for WhatsApp / SMS)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClosePasswordModal}
+                    className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm transition"
+                  >
+                    Done & Close
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleSavePassword} className="mt-4 space-y-4">
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                  <div className="text-xs text-slate-500">Configuring credentials for:</div>
+                  <div className="text-sm font-bold text-slate-900 mt-0.5">
+                    {selectedEmployee.name}
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs text-slate-500">User ID:</span>
+                    <span className="font-mono text-xs font-bold text-indigo-700 bg-white px-2 py-0.5 rounded border border-slate-200">
+                      {selectedEmployee.employee_id}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600">
+                      New Password *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setNewPassword(generateRandomPassword())}
+                      className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold hover:underline flex items-center gap-1"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>Generate Strong Password</span>
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <input
+                      type={showPlainPassword ? "text" : "password"}
+                      required
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Enter new employee password"
+                      className="w-full text-sm px-3 py-2.5 border rounded-xl border-slate-300 focus:ring-2 focus:ring-indigo-500 font-mono pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPlainPassword(!showPlainPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      {showPlainPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1.5">
+                    Minimum 4 characters. Active immediately for employee sign-in.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-800">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <span>
+                    Remember to share this password with <strong>{selectedEmployee.name}</strong> along with their User ID <strong>{selectedEmployee.employee_id}</strong>.
                   </span>
                 </div>
-              </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-                    New Password *
-                  </label>
+                <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100">
                   <button
                     type="button"
-                    onClick={() => setNewPassword(generateRandomPassword())}
-                    className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold hover:underline flex items-center gap-1"
+                    onClick={handleClosePasswordModal}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition"
                   >
-                    <RefreshCw className="w-3 h-3" />
-                    <span>Generate Strong Password</span>
+                    Cancel
                   </button>
-                </div>
-
-                <div className="relative">
-                  <input
-                    type={showPlainPassword ? "text" : "password"}
-                    required
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Enter new employee password"
-                    className="w-full text-sm px-3 py-2.5 border rounded-xl border-slate-300 focus:ring-2 focus:ring-indigo-500 font-mono pr-10"
-                  />
                   <button
-                    type="button"
-                    onClick={() => setShowPlainPassword(!showPlainPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    type="submit"
+                    disabled={savingPassword}
+                    className="px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm transition disabled:opacity-50 flex items-center gap-1.5"
                   >
-                    {showPlainPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>{savingPassword ? "Updating..." : "Save & Set Password"}</span>
                   </button>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-1.5">
-                  After saving, this will be immediately active for the employee to sign in.
-                </p>
-              </div>
-
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-800">
-                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <span>
-                  Remember to share this password with <strong>{selectedEmployee.name}</strong> along with their User ID <strong>{selectedEmployee.employee_id}</strong>.
-                </span>
-              </div>
-
-              <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={handleClosePasswordModal}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingPassword}
-                  className="px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm transition disabled:opacity-50 flex items-center gap-1.5"
-                >
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>{savingPassword ? "Updating..." : "Save & Set Password"}</span>
-                </button>
-              </div>
-            </form>
+              </form>
+            )}
           </div>
         </div>
       )}

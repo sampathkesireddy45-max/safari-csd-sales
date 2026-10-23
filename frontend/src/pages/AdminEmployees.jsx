@@ -114,14 +114,26 @@ const AdminEmployees = () => {
         ...formData,
         assigned_location_id: formData.assigned_location_id ? parseInt(formData.assigned_location_id, 10) : null,
       };
-      if (!payload.password) delete payload.password;
+      if (!payload.password || !payload.password.trim()) {
+        delete payload.password;
+      } else {
+        payload.password = payload.password.trim();
+        if (payload.password.length < 4) {
+          addToast("Password must be at least 4 characters long", "error");
+          return;
+        }
+      }
 
       if (showAddModal) {
         await createEmployee(payload);
         addToast("Employee created successfully!", "success");
       } else if (showEditModal && editEmployee) {
         await updateEmployee(editEmployee.id, payload);
-        addToast("Employee updated successfully!", "success");
+        if (payload.password) {
+          addToast(`Employee & new password updated for ${editEmployee.name} (${editEmployee.employee_id})!`, "success");
+        } else {
+          addToast("Employee updated successfully!", "success");
+        }
       }
       handleCloseModal();
       loadData();

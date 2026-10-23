@@ -570,51 +570,66 @@ def update_employee_opening_stock(
         "location_name": location.name
     }
 
+def _lookup_employee(db: Session, identifier: str) -> Employee | None:
+    if identifier.isdigit():
+        emp = crud.get_employee(db, employee_id=int(identifier))
+        if emp:
+            return emp
+    return db.query(Employee).filter(
+        (Employee.employee_id == identifier) |
+        (func.lower(Employee.employee_id) == identifier.lower())
+    ).first()
+
 @router.get("/{employee_id}", response_model=schemas.Employee)
-def read_employee(employee_id: int, db: Session = Depends(get_db), current_user: Employee = Depends(get_current_active_user)):
-    if current_user.role != "admin" and current_user.id != employee_id:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
-    db_employee = crud.get_employee(db, employee_id=employee_id)
+def read_employee(employee_id: str, db: Session = Depends(get_db), current_user: Employee = Depends(get_current_active_user)):
+    db_employee = _lookup_employee(db, str(employee_id))
     if db_employee is None:
         raise HTTPException(status_code=404, detail="Employee not found")
+    if current_user.role != "admin" and current_user.id != db_employee.id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
     return db_employee
 
 @router.put("/{employee_id}", response_model=schemas.Employee)
-def update_employee(employee_id: int, employee: schemas.EmployeeUpdate, db: Session = Depends(get_db), current_user: Employee = Depends(get_current_active_admin_user)):
-    db_employee = crud.get_employee(db, employee_id=employee_id)
+def update_employee(employee_id: str, employee: schemas.EmployeeUpdate, db: Session = Depends(get_db), current_user: Employee = Depends(get_current_active_admin_user)):
+    db_employee = _lookup_employee(db, str(employee_id))
     if db_employee is None:
         raise HTTPException(status_code=404, detail="Employee not found")
-    return crud.update_employee(db, employee_id=employee_id, employee=employee)
+    return crud.update_employee(db, employee_id=db_employee.id, employee=employee)
 
 @router.delete("/{employee_id}", response_model=schemas.Employee)
-def delete_employee(employee_id: int, db: Session = Depends(get_db), current_user: Employee = Depends(get_current_active_admin_user)):
-    db_employee = crud.get_employee(db, employee_id=employee_id)
+def delete_employee(employee_id: str, db: Session = Depends(get_db), current_user: Employee = Depends(get_current_active_admin_user)):
+    db_employee = _lookup_employee(db, str(employee_id))
     if db_employee is None:
         raise HTTPException(status_code=404, detail="Employee not found")
     if db_employee.id == current_user.id:
         raise HTTPException(status_code=400, detail="You cannot remove your own admin account")
     if db_employee.role == "admin":
         raise HTTPException(status_code=403, detail="Admin accounts cannot be removed from the staff portal")
-    return crud.delete_employee(db, employee_id=employee_id)
+    return crud.delete_employee(db, employee_id=db_employee.id)
 
 # --- Admin Password Reset for Staff ---
 @router.post("/{employee_id}/reset-password")
 def admin_reset_password(
-    employee_id: int,
+    employee_id: str,
     reset_data: schemas.EmployeePasswordReset,
     db: Session = Depends(get_db),
     current_user: Employee = Depends(get_current_active_admin_user)
 ):
-    emp = db.query(Employee).filter(Employee.id == employee_id).first()
+    emp = _lookup_employee(db, str(employee_id))
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
-    if len(reset_data.password.strip()) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters long")
-    emp.set_password(reset_data.password.strip())
+    clean_pwd = reset_data.password.strip()
+    if len(clean_pwd) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters long")
+    emp.set_password(clean_pwd)
+    emp.status = "active"
     db.commit()
+    db.refresh(emp)
     return {
         "status": "success",
-        "message": f"Password updated successfully for employee {emp.employee_id} ({emp.name})"
+        "message": f"Password updated successfully for employee {emp.employee_id} ({emp.name})",
+        "employee_id": emp.employee_id,
+        "name": emp.name
     }
 
 # --- Employee Dashboard Statistics ---

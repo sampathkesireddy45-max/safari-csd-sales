@@ -31,13 +31,28 @@ class Employee(Base):
         return self.assigned_location.name if self.assigned_location else None
 
     def set_password(self, password: str):
+        cleaned = password.strip() if isinstance(password, str) else str(password)
         salt = bcrypt.gensalt()
-        self.hashed_password = bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+        self.hashed_password = bcrypt.hashpw(cleaned.encode("utf-8"), salt).decode("utf-8")
 
     def verify_password(self, password: str) -> bool:
         if not self.hashed_password:
             return False
-        try:
-            return bcrypt.checkpw(password.encode("utf-8"), self.hashed_password.encode("utf-8"))
-        except Exception:
-            return self.hashed_password == password
+        if not password:
+            return False
+
+        candidates = [password]
+        stripped = password.strip()
+        if stripped != password:
+            candidates.append(stripped)
+
+        hashed_bytes = self.hashed_password.encode("utf-8")
+        for cand in candidates:
+            try:
+                if bcrypt.checkpw(cand.encode("utf-8"), hashed_bytes):
+                    return True
+            except Exception:
+                pass
+            if self.hashed_password == cand:
+                return True
+        return False

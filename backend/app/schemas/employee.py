@@ -36,7 +36,7 @@ class LiveLocationUpdate(BaseModel):
     longitude: float = Field(..., ge=-180, le=180)
 
 class EmployeePasswordReset(BaseModel):
-    password: str = Field(..., min_length=8)
+    password: str = Field(..., min_length=4)
 
 class EmployeeInDBBase(EmployeeBase):
     id: int

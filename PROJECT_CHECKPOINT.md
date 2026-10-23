@@ -1,8 +1,23 @@
 # Safari CSD Sales & Stock Telemetry - Session Checkpoint
 
-**Last Saved Timestamp:** October 22, 2026 - 22:25 IST  
-**Conversation ID:** `ba0b9e86-9f6e-4832-abce-fb5772e3fe8c` / `67cd9427-7d06-4545-8af5-033f7220a93b`  
+**Last Saved Timestamp:** October 23, 2026 - 15:10 IST  
 **Workspace Path:** `C:\Users\sampa\overall sales`  
+
+---
+
+## 🔒 Employee Password Management & Login Synchronization Fix (October 23, 2026)
+- **Root Cause Resolution**:
+  - The backend Pydantic schema `EmployeePasswordReset` and router checks strictly enforced an 8-character minimum, whereas frontend allowed passwords starting from 4 characters. When admins entered 4-7 character passwords (e.g. `canteen`, `safari`, `123456`), the request failed schema validation without applying to the database.
+  - The endpoint `POST /employees/{employee_id}/reset-password` was typed strictly as `employee_id: int`. Submitting employee code strings (e.g. `SAF20162`) triggered FastAPI HTTP 422 routing failures.
+  - In `Login.jsx` and backend `auth.py`, passwords with accidental leading/trailing whitespace (common on mobile keyboards/autofill) caused bcrypt mismatch.
+  - In `AdminCredentials.jsx`, table action button labeled "Copy Pass" defaulted to copying `[Admin Configured Password]` placeholder text instead of real credentials, misleading administrators.
+- **Fixes Applied**:
+  - **Flexible Password Length**: Aligned minimum password length across backend (`EmployeePasswordReset`, `EmployeeCreate`, `reactivate_employee`) and frontend to 4 characters.
+  - **Dual ID/Code Routing Support**: Updated `/employees/{employee_id}`, `/employees/{employee_id}/reset-password`, and `PUT` endpoints to dynamically resolve both numeric database IDs (`4`) and official employee code strings (`SAF20162`).
+  - **Resilient Password Verification**: Updated `Employee.verify_password` and `Employee.set_password` in `backend/app/models/employee.py` to strip and evaluate both raw and trimmed candidates cleanly against bcrypt hashes.
+  - **Show/Hide Eye Toggle**: Added password visibility toggles on `Login.jsx`, `AdminCredentials.jsx`, and `AdminEmployees.jsx` to prevent unseen typos.
+  - **Clear Post-Reset Confirmation**: Admin modal now displays explicit confirmation with separate "Copy Just Password", "Copy User ID", and "Copy Full WhatsApp Slip" buttons. Active session passwords are saved and directly copyable from table rows.
+  - **Full Test Coverage**: 9 automated acceptance tests verified end-to-end admin password reset and immediate staff portal authentication.
 
 ---
 
