@@ -13,6 +13,8 @@ from ..models.product import Product
 from ..models.damage_report import DamageReport
 from ..models.damage_report_item import DamageReportItem
 from ..models.stock_transfer import StockTransfer
+from ..models.monthly_stock import MonthlyStock
+from ..models.admin_stock_audit import AdminStockAuditLog
 from ..utils.database import get_db
 from ..utils.auth import get_current_active_user, get_current_active_admin_user
 from .. import schemas, crud
@@ -329,6 +331,11 @@ def get_employee_sales_dashboard(
 
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.index_no, Product.name).all()
 
+    current_year_month = date_from[:7] if (date_from and len(date_from) >= 7) else to_ist(datetime.utcnow()).strftime("%Y-%m")
+    monthly_records = db.query(MonthlyStock).filter(MonthlyStock.year_month == current_year_month).all()
+    store_monthly_map = {ms.product_id: ms for ms in monthly_records if ms.location_id == active_loc_id}
+    overall_monthly_map = {ms.product_id: ms for ms in monthly_records if ms.location_id is None}
+
     items = []
     # Metrics accumulators
     total_my_sold = 0
@@ -337,10 +344,12 @@ def get_employee_sales_dashboard(
     total_store_closing = 0
     total_store_sold = 0
     total_store_revenue = 0.0
+    total_store_damaged = 0
     total_overall_opening = 0
     total_overall_closing = 0
     total_overall_sold = 0
     total_overall_revenue = 0.0
+    total_overall_damaged = 0
 
     low_stock_count = 0
     out_of_stock_count = 0
@@ -353,24 +362,43 @@ def get_employee_sales_dashboard(
         pack = p.case_pack if p.case_pack and p.case_pack > 0 else 1
 
         # Individual store metrics:
-        # Closing Stock = Opening Stock + Received In - Dispatched Out - Sold - Damaged
-        # Opening Stock = Closing Stock + Dispatched Out + Sold + Damaged - Received In
-        store_closing = store_stock_map.get(p.id, 0)
+        # Formula: Closing Stock = Opening Stock + Total Received In - Total Dispatched Out - Total Pieces Sold
+        # Damages must be recorded separately and must NOT be subtracted from displayed Closing Stock.
         store_sold = store_sales_map.get(p.id, 0)
         store_damaged = store_damage_map.get(p.id, 0)
         store_transfer_out = store_transfer_out_map.get(p.id, 0)
         store_transfer_in = store_transfer_in_map.get(p.id, 0)
-        store_opening = max(0, store_closing + store_sold + store_damaged + store_transfer_out - store_transfer_in)
+
+        ms_store = store_monthly_map.get(p.id)
+        if ms_store:
+            store_opening = ms_store.opening_stock
+            if ms_store.is_closing_manually_edited and ms_store.manual_closing_stock is not None:
+                store_closing = ms_store.manual_closing_stock
+            else:
+                store_closing = max(0, store_opening + store_transfer_in - store_transfer_out - store_sold)
+        else:
+            store_opening = max(0, store_stock_map.get(p.id, 0) + store_sold + store_transfer_out - store_transfer_in)
+            store_closing = max(0, store_opening + store_transfer_in - store_transfer_out - store_sold)
+
         s_rev = round(store_sold * rate, 2)
 
         # Overall network metrics:
-        # Fleet Opening = Fleet Closing + Fleet Sold + Fleet Damaged + Fleet Dispatched Out - Fleet Received In
-        overall_closing = overall_stock_map.get(p.id, 0)
         overall_sold = overall_sales_map.get(p.id, 0)
         overall_damaged = overall_damage_map.get(p.id, 0)
         overall_t_out = fleet_transfer_out_map.get(p.id, 0)
         overall_t_in = fleet_transfer_in_map.get(p.id, 0)
-        overall_opening = max(0, overall_closing + overall_sold + overall_damaged + overall_t_out - overall_t_in)
+
+        ms_overall = overall_monthly_map.get(p.id)
+        if ms_overall:
+            overall_opening = ms_overall.opening_stock
+            if ms_overall.is_closing_manually_edited and ms_overall.manual_closing_stock is not None:
+                overall_closing = ms_overall.manual_closing_stock
+            else:
+                overall_closing = max(0, overall_opening + overall_t_in - overall_t_out - overall_sold)
+        else:
+            overall_opening = max(0, overall_stock_map.get(p.id, 0) + overall_sold + overall_t_out - overall_t_in)
+            overall_closing = max(0, overall_opening + overall_t_in - overall_t_out - overall_sold)
+
         o_rev = round(overall_sold * rate, 2)
 
         # Employee's individual sales
@@ -458,6 +486,8 @@ def get_employee_sales_dashboard(
             "closing_remainder": store_closing % pack,
             "status": status_tag,
             "has_sales": (my_sold > 0 or store_sold > 0),
+            "store_damaged": store_damaged,
+            "overall_damaged": overall_damaged if current_user.role == "admin" else 0,
         })
 
     items.sort(key=lambda x: (-x["store_pieces_sold"], -x["my_pieces_sold"], -x["my_revenue"], x["index_no"]))
@@ -542,6 +572,8 @@ def get_employee_sales_dashboard(
             "total_revenue": total_my_revenue,
             "total_opening_stock": total_store_opening,
             "total_closing_stock": total_store_closing,
+            "total_store_damaged": total_store_damaged,
+            "total_overall_damaged": total_overall_damaged if current_user.role == "admin" else 0,
 
             "low_stock_count": low_stock_count,
             "out_of_stock_count": out_of_stock_count,
@@ -635,15 +667,36 @@ def update_employee_opening_stock(
         StockTransfer.status == "RECEIVED"
     ).scalar() or 0
 
-    # Closing Stock = Opening Stock + Received In - Dispatched Out - Sold - Damaged
-    min_required_opening = max(0, pieces_sold + damaged_qty + t_out - t_in)
+    # Formula: Closing Stock = Opening Stock + Total Received In - Total Dispatched Out - Total Pieces Sold
+    # Damages must be recorded separately and must NOT be subtracted from displayed Closing Stock.
+    min_required_opening = max(0, pieces_sold + t_out - t_in)
     if req.opening_stock < min_required_opening:
         raise HTTPException(
             status_code=400,
-            detail=f"Opening stock ({req.opening_stock} PCS) cannot be less than net volume reduced by sales, damages & transfers ({min_required_opening} PCS) for {product.name} at {location.name}."
+            detail=f"Opening stock ({req.opening_stock} PCS) cannot be less than net volume reduced by sales & transfers ({min_required_opening} PCS) for {product.name} at {location.name}."
         )
 
-    new_closing_stock = req.opening_stock + t_in - t_out - pieces_sold - damaged_qty
+    new_closing_stock = req.opening_stock + t_in - t_out - pieces_sold
+
+    year_month = req.date_from[:7] if (req.date_from and len(req.date_from) >= 7) else to_ist(datetime.utcnow()).strftime("%Y-%m")
+    ms = db.query(MonthlyStock).filter(
+        MonthlyStock.year_month == year_month,
+        MonthlyStock.location_id == target_location_id,
+        MonthlyStock.product_id == req.product_id
+    ).first()
+    if not ms:
+        ms = MonthlyStock(
+            year_month=year_month,
+            location_id=target_location_id,
+            product_id=req.product_id,
+            opening_stock=req.opening_stock,
+            is_closing_manually_edited=False
+        )
+        db.add(ms)
+    else:
+        ms.opening_stock = req.opening_stock
+        if ms.is_closing_manually_edited and ms.manual_closing_stock is not None:
+            new_closing_stock = ms.manual_closing_stock
 
     inv = db.query(Inventory).filter(
         Inventory.product_id == req.product_id,

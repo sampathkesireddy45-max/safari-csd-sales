@@ -310,17 +310,22 @@ const StockTransfers = () => {
       <div className="space-y-6">
         {/* Role Banner for Staff */}
         {!isAdmin && (
-          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-4 shadow-sm">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-4 sm:p-5 flex items-center justify-between gap-4 shadow-lg text-white">
             <div className="flex items-center gap-3.5">
-              <div className="p-2.5 rounded-xl bg-indigo-600 text-white shrink-0 shadow-sm">
+              <div className="p-2.5 rounded-xl bg-indigo-600 text-white shrink-0 shadow-md">
                 <Boxes className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-xs font-extrabold text-slate-900 dark:text-white uppercase tracking-wider">
-                  Store Counter Transfer Desk ({user?.assigned_location?.name || `Counter #${user?.assigned_location_id}`})
-                </h4>
-                <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
-                  Admin orders transfers between stores. When stock arrives at your counter, click <strong className="text-emerald-600 dark:text-emerald-400 font-bold">"Click Received"</strong> to verify actual count and add pieces to your live counter stock.
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h4 className="text-xs font-black text-white uppercase tracking-wider">
+                    Store Counter Transfer Desk
+                  </h4>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    {user?.assigned_location?.name || `Counter #${user?.assigned_location_id}`}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-200 mt-1.5 leading-relaxed font-medium">
+                  Admin orders transfers between stores. When stock arrives at your counter, click <strong className="text-emerald-400 font-bold bg-emerald-950/70 px-1.5 py-0.5 rounded border border-emerald-500/30">"Click Received"</strong> to verify actual count and add pieces to your live counter stock.
                 </p>
               </div>
             </div>

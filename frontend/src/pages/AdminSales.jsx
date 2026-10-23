@@ -42,6 +42,8 @@ import {
   updateSale,
   deleteSale,
   updateAdminOpeningStock,
+  updateAdminClosingStock,
+  triggerStockRollover,
 } from "../services/api";
 import { useToast } from "../components/Toast";
 
@@ -88,6 +90,14 @@ const AdminSales = () => {
   const [editOpeningLocationId, setEditOpeningLocationId] = useState("");
   const [newOpeningStockValue, setNewOpeningStockValue] = useState("");
   const [savingOpeningStock, setSavingOpeningStock] = useState(false);
+
+  // Admin Edit Closing Stock Modal State (Admin Only Permission)
+  const [editingClosingStock, setEditingClosingStock] = useState(null);
+  const [editClosingLocationId, setEditClosingLocationId] = useState("");
+  const [newClosingStockValue, setNewClosingStockValue] = useState("");
+  const [closingReason, setClosingReason] = useState("");
+  const [savingClosingStock, setSavingClosingStock] = useState(false);
+  const [rollingOver, setRollingOver] = useState(false);
 
   // Edit / Correct Sale Modal State
   const [editingSale, setEditingSale] = useState(null);
@@ -275,6 +285,83 @@ const AdminSales = () => {
       addToast(err.message || "Failed to update opening stock", "error");
     } finally {
       setSavingOpeningStock(false);
+    }
+  };
+
+  // Admin Closing Stock Modal Handlers
+  const handleOpenEditClosingModal = (item) => {
+    const defaultLocId =
+      selectedLocation && selectedLocation !== "all"
+        ? parseInt(selectedLocation, 10)
+        : locations[0]?.id || 1;
+
+    setEditingClosingStock(item);
+    setEditClosingLocationId(defaultLocId);
+    const initialClosing =
+      selectedLocation && selectedLocation !== "all"
+        ? item.store_closing_stock ?? item.closing_stock ?? 0
+        : item.overall_closing_stock ?? item.closing_stock ?? 0;
+    setNewClosingStockValue(String(initialClosing));
+    setClosingReason("Physical inventory count reconciliation");
+  };
+
+  const handleCloseEditClosingModal = () => {
+    setEditingClosingStock(null);
+    setEditClosingLocationId("");
+    setNewClosingStockValue("");
+    setClosingReason("");
+  };
+
+  const handleSaveClosingStock = async (e) => {
+    e.preventDefault();
+    if (!editingClosingStock || !editClosingLocationId) {
+      addToast("Please select a target store counter location", "error");
+      return;
+    }
+    const val = parseInt(newClosingStockValue, 10);
+    if (isNaN(val) || val < 0) {
+      addToast("Please enter a valid non-negative closing stock", "error");
+      return;
+    }
+
+    setSavingClosingStock(true);
+    try {
+      const res = await updateAdminClosingStock({
+        product_id: editingClosingStock.product_id,
+        location_id: editClosingLocationId,
+        closing_stock: val,
+        reason: closingReason || "Admin manual closing stock adjustment",
+      });
+      const targetStore = locations.find((l) => l.id === editClosingLocationId);
+      addToast(
+        res.message ||
+          `Closing stock for Index #${editingClosingStock.index_no} at ${targetStore?.name || "Store"} updated to ${val} PCS!`,
+        "success"
+      );
+      handleCloseEditClosingModal();
+      await loadSales();
+    } catch (err) {
+      console.error("Failed to update closing stock:", err);
+      addToast(err.message || "Failed to update closing stock", "error");
+    } finally {
+      setSavingClosingStock(false);
+    }
+  };
+
+  const handleTriggerRollover = async () => {
+    if (!window.confirm("Perform Month-End Stock Rollover?\n\nThis will carry forward previous month's final closing stock as the new month's opening stock for all stores and SKUs. Historical records are preserved.")) {
+      return;
+    }
+    setRollingOver(true);
+    try {
+      const res = await triggerStockRollover();
+      addToast(res.message || "Month-end rollover completed successfully!", "success");
+      await loadSales();
+    } catch (err) {
+      console.error("Failed to trigger rollover:", err);
+      addToast(err.message || "Failed to trigger rollover", "error");
+    } finally {
+      setRollingOver(false);
     }
   };
 
@@ -528,6 +615,17 @@ const AdminSales = () => {
           >
             <PackagePlus className="w-3.5 h-3.5" />
             <span>+ Add Stock</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleTriggerRollover}
+            disabled={rollingOver}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 disabled:opacity-60 transition shadow-sm"
+            title="Roll over final closing stock from previous month as new month's opening stock"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${rollingOver ? "animate-spin" : ""}`} />
+            <span>{rollingOver ? "Rolling over..." : "Month Rollover"}</span>
           </button>
 
           <button
@@ -1043,9 +1141,21 @@ const AdminSales = () => {
                                 )}
                               </td>
                               <td className="px-3 py-2.5 text-right font-mono font-bold bg-blue-50/30 text-blue-950 whitespace-nowrap border-r border-blue-100">
-                                {viewUnit === "cases"
-                                  ? `${(storeClosing / item.case_pack).toFixed(1)} Cs`
-                                  : `${storeClosing} PCS`}
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <span>
+                                    {viewUnit === "cases"
+                                      ? `${(storeClosing / item.case_pack).toFixed(1)} Cs`
+                                      : `${storeClosing} PCS`}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditClosingModal(item)}
+                                    className="p-1 rounded-md text-blue-700 hover:text-blue-900 hover:bg-blue-100 transition"
+                                    title={`Manually edit Store Closing Stock for Index #${item.index_no}`}
+                                  >
+                                    <Edit3 className="w-3 h-3" />
+                                  </button>
+                                </div>
                               </td>
                             </>
                           )}
@@ -1109,6 +1219,15 @@ const AdminSales = () => {
                               >
                                 <Edit3 className="w-3 h-3" />
                                 <span>Edit Opening</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditClosingModal(item)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 transition border border-violet-200"
+                                title="Manually adjust closing stock (saved permanently)"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>Edit Closing</span>
                               </button>
                               <button
                                 type="button"
@@ -1884,6 +2003,135 @@ const AdminSales = () => {
                     </>
                   ) : (
                     <span>Save Store Opening Stock</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: EDIT CLOSING STOCK (ADMIN ONLY) ================= */}
+      {editingClosingStock && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-violet-100 text-violet-700">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">
+                    Edit Store Closing Stock (Admin)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Index #{editingClosingStock.index_no} • Manual overrides are preserved
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseEditClosingModal}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveClosingStock} className="space-y-4">
+              {/* Product Info Box */}
+              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Selected Item
+                </span>
+                <p className="text-sm font-bold text-slate-900">
+                  {editingClosingStock.name}
+                </p>
+                <div className="text-xs text-slate-500 flex items-center justify-between pt-2 border-t border-slate-200">
+                  <span>
+                    Selling Rate: <strong className="text-emerald-700 font-mono">₹{editingClosingStock.selling_rate}</strong>
+                  </span>
+                  <span>
+                    Case Pack: <strong>{editingClosingStock.case_pack} pcs/cs</strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Target Store Location Picker */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                  Target Store Counter Location <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={editClosingLocationId || ""}
+                  onChange={(e) => setEditClosingLocationId(parseInt(e.target.value, 10))}
+                  className="w-full text-sm font-semibold px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-violet-500 outline-none text-slate-900 bg-white"
+                  required
+                >
+                  {locations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Input for Manual Closing Stock */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                  New Physical Closing Stock (Pieces) <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={newClosingStockValue}
+                  onChange={(e) => setNewClosingStockValue(e.target.value)}
+                  className="w-full text-lg font-bold px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-violet-500 outline-none text-slate-900"
+                  required
+                  autoFocus
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Manual edits are permanently saved and will not be overwritten by automatic recalculations.
+                </p>
+              </div>
+
+              {/* Audit Reason Input */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                  Audit Reason for Adjustment <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={closingReason}
+                  onChange={(e) => setClosingReason(e.target.value)}
+                  placeholder="e.g. Physical inventory count audit reconciliation"
+                  className="w-full text-xs font-medium px-3.5 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-violet-500 outline-none text-slate-900"
+                  required
+                />
+              </div>
+
+              {/* Form Action Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={handleCloseEditClosingModal}
+                  disabled={savingClosingStock}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingClosingStock}
+                  className="px-5 py-2.5 text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 rounded-xl shadow-md shadow-violet-600/30 transition flex items-center gap-2"
+                >
+                  {savingClosingStock ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving Audit & Overrides...</span>
+                    </>
+                  ) : (
+                    <span>Save Store Closing Stock</span>
                   )}
                 </button>
               </div>

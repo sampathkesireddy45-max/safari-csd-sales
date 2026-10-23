@@ -32,6 +32,19 @@ class AdminOpeningStockUpdateRequest(BaseModel):
     opening_stock: int
     date_from: Optional[str] = None
     date_to: Optional[str] = None
+    reason: Optional[str] = "Admin manual opening stock adjustment"
+
+class AdminClosingStockUpdateRequest(BaseModel):
+    product_id: int
+    location_id: int
+    closing_stock: int
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    reason: Optional[str] = "Admin manual closing stock adjustment"
+
+class AdminRolloverRequest(BaseModel):
+    from_year_month: Optional[str] = None
+    to_year_month: Optional[str] = None
 
 def _sale_cost(sale):
     return round(sum(
@@ -74,10 +87,13 @@ def _sales_query(db: Session, employee_id: int = None, location_id: str = None, 
                 pass
     return query
 
-def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, location_id: str = None, all_network_sales = None):
+def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, location_id: str = None, all_network_sales = None, date_from: str = None):
     """
-    Computes aggregated index-wise performance for products, combining opening stock,
-    pieces sold, closing stock, equivalent cases, revenue, and date sold for both individual store and overall network.
+    Computes aggregated index-wise performance for products according to FINAL INVENTORY MANAGEMENT FORMULAS:
+    - Monthly Opening Stock remains fixed throughout the month.
+    - Closing Stock = Opening Stock + Total Received In - Total Dispatched Out - Total Pieces Sold
+    - Damages are tracked separately and NOT subtracted from displayed Closing Stock.
+    - Manual admin closing edits are saved and never overwritten by automatic recalculation.
     """
     product_sales_map = {}
     for sale in all_sales:
@@ -210,6 +226,11 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
     fleet_transfer_in_map = {row[0]: int(row[1] or 0) for row in fleet_in_rows}
 
     products = db.query(models.Product).filter(models.Product.is_active == True).order_by(models.Product.index_no, models.Product.name).all()
+
+    current_year_month = date_from[:7] if (date_from and len(date_from) >= 7) else to_ist(datetime.utcnow()).strftime("%Y-%m")
+    monthly_records = db.query(models.MonthlyStock).filter(models.MonthlyStock.year_month == current_year_month).all()
+    store_monthly_map = {(ms.location_id, ms.product_id): ms for ms in monthly_records if ms.location_id is not None}
+    overall_monthly_map = {ms.product_id: ms for ms in monthly_records if ms.location_id is None}
     
     index_wise = []
     total_catalog_pieces = 0
@@ -220,6 +241,8 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
     total_overall_closing = 0
     total_store_opening = 0
     total_store_closing = 0
+    total_store_damaged = 0
+    total_overall_damaged = 0
 
     for p in products:
         sales_info = product_sales_map.get(p.id, {"pieces_sold": 0, "transactions_count": 0, "sale_dates": set()})
@@ -234,23 +257,42 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
         cases_sold = round(pieces_sold / case_pack, 2)
 
         # Overall fleet numbers:
-        # Total Fleet Opening = Fleet Closing + Fleet Sold + Fleet Damaged + Fleet Dispatched Out - Fleet Received In
-        overall_closing = overall_stock_map.get(p.id, 0)
         overall_sold = network_sales_map.get(p.id, 0)
         overall_damaged = overall_damage_map.get(p.id, 0)
         overall_t_out = fleet_transfer_out_map.get(p.id, 0)
         overall_t_in = fleet_transfer_in_map.get(p.id, 0)
-        overall_opening = max(0, overall_closing + overall_sold + overall_damaged + overall_t_out - overall_t_in)
+
+        ms_overall = overall_monthly_map.get(p.id)
+        if ms_overall:
+            overall_opening = ms_overall.opening_stock
+            if ms_overall.is_closing_manually_edited and ms_overall.manual_closing_stock is not None:
+                overall_closing = ms_overall.manual_closing_stock
+            else:
+                overall_closing = max(0, overall_opening + overall_t_in - overall_t_out - overall_sold)
+        else:
+            overall_opening = max(0, overall_stock_map.get(p.id, 0) + overall_sold + overall_t_out - overall_t_in)
+            overall_closing = max(0, overall_opening + overall_t_in - overall_t_out - overall_sold)
 
         # Individual store numbers:
-        # Opening Stock = Closing Stock + Dispatched Out + Sold + Damaged - Received In
-        # Closing Stock = Opening Stock + Received In - Dispatched Out - Sold - Damaged
-        store_closing = store_stock_map.get(p.id, 0)
+        # Formula: Closing Stock = Opening Stock + Total Received In - Total Dispatched Out - Total Pieces Sold
+        # Damages must be recorded separately and must NOT be subtracted from displayed Closing Stock.
         store_transfer_out = store_transfer_out_map.get(p.id, 0)
         store_transfer_in = store_transfer_in_map.get(p.id, 0)
         store_sold = pieces_sold
         store_damaged = store_damage_map.get(p.id, 0)
-        store_opening = max(0, store_closing + store_sold + store_damaged + store_transfer_out - store_transfer_in)
+
+        ms_store = store_monthly_map.get((target_store_id, p.id)) if target_store_id else None
+        is_closing_manually_edited = False
+        if ms_store:
+            store_opening = ms_store.opening_stock
+            if ms_store.is_closing_manually_edited and ms_store.manual_closing_stock is not None:
+                store_closing = ms_store.manual_closing_stock
+                is_closing_manually_edited = True
+            else:
+                store_closing = max(0, store_opening + store_transfer_in - store_transfer_out - store_sold)
+        else:
+            store_opening = max(0, store_stock_map.get(p.id, 0) + store_sold + store_transfer_out - store_transfer_in)
+            store_closing = max(0, store_opening + store_transfer_in - store_transfer_out - store_sold)
 
         # Active view numbers (based on whether store is selected or overall)
         closing_stock = store_closing if is_specific_store else overall_closing
@@ -264,6 +306,8 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
         total_overall_closing += overall_closing
         total_store_opening += store_opening
         total_store_closing += store_closing
+        total_store_damaged += store_damaged
+        total_overall_damaged += overall_damaged
 
         index_wise.append({
             "product_id": p.id,
@@ -290,6 +334,9 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
             "transactions_count": sales_info["transactions_count"],
             "date_sold": date_sold_str,
             "has_sales": pieces_sold > 0,
+            "store_damaged": store_damaged,
+            "overall_damaged": overall_damaged,
+            "is_closing_manually_edited": is_closing_manually_edited,
         })
 
     # Sort: products with sales first (descending pieces, then revenue), then by index_no
@@ -306,6 +353,8 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
         "overall_closing_stock": total_overall_closing,
         "store_opening_stock": total_store_opening,
         "store_closing_stock": total_store_closing,
+        "total_store_damaged": total_store_damaged,
+        "total_overall_damaged": total_overall_damaged,
     }
 
 @router.get("/sales")
@@ -325,7 +374,7 @@ def get_admin_sales_summary(
     all_sales = query.all()
 
     index_wise_sales, index_summary = _build_index_wise_sales(
-        all_sales, db, employee_id=employee_id, location_id=location_id, all_network_sales=all_network_sales
+        all_sales, db, employee_id=employee_id, location_id=location_id, all_network_sales=all_network_sales, date_from=date_from
     )
 
     all_locations = db.query(models.Location).filter(models.Location.is_active == True).order_by(models.Location.name).all()
@@ -479,15 +528,38 @@ def update_admin_opening_stock(
         models.StockTransfer.status == "RECEIVED"
     ).scalar() or 0
 
-    # Closing Stock = Opening Stock + Received In - Dispatched Out - Sold - Damaged
-    min_required_opening = max(0, pieces_sold + damaged_qty + t_out - t_in)
+    # Formula: Closing Stock = Opening Stock + Total Received In - Total Dispatched Out - Total Pieces Sold
+    # Damages must be recorded separately and must NOT be subtracted from displayed Closing Stock.
+    min_required_opening = max(0, pieces_sold + t_out - t_in)
     if req.opening_stock < min_required_opening:
         raise HTTPException(
             status_code=400,
-            detail=f"Opening stock ({req.opening_stock} PCS) cannot be less than net volume reduced by sales, damages & transfers ({min_required_opening} PCS) for {product.name} at {location.name}."
+            detail=f"Opening stock ({req.opening_stock} PCS) cannot be less than net volume reduced by sales & transfers ({min_required_opening} PCS) for {product.name} at {location.name}."
         )
 
-    new_closing_stock = req.opening_stock + t_in - t_out - pieces_sold - damaged_qty
+    new_closing_stock = req.opening_stock + t_in - t_out - pieces_sold
+
+    year_month = req.date_from[:7] if (req.date_from and len(req.date_from) >= 7) else to_ist(datetime.utcnow()).strftime("%Y-%m")
+    ms = db.query(models.MonthlyStock).filter(
+        models.MonthlyStock.year_month == year_month,
+        models.MonthlyStock.location_id == req.location_id,
+        models.MonthlyStock.product_id == req.product_id,
+    ).first()
+
+    old_opening = ms.opening_stock if ms else 0
+    if not ms:
+        ms = models.MonthlyStock(
+            year_month=year_month,
+            location_id=req.location_id,
+            product_id=req.product_id,
+            opening_stock=req.opening_stock,
+            is_closing_manually_edited=False,
+        )
+        db.add(ms)
+    else:
+        ms.opening_stock = req.opening_stock
+        if ms.is_closing_manually_edited and ms.manual_closing_stock is not None:
+            new_closing_stock = ms.manual_closing_stock
 
     inv = db.query(models.Inventory).filter(
         models.Inventory.product_id == req.product_id,
@@ -518,6 +590,19 @@ def update_admin_opening_stock(
         performed_by=current_admin.id
     )
     db.add(txn)
+
+    from ..utils.stock_service import log_admin_stock_audit
+    log_admin_stock_audit(
+        db=db,
+        admin_id=current_admin.id,
+        stock_type="STORE_OPENING",
+        year_month=year_month,
+        location_id=req.location_id,
+        product_id=req.product_id,
+        previous_value=old_opening,
+        updated_value=req.opening_stock,
+        reason=req.reason or "Admin manual opening stock adjustment",
+    )
     db.commit()
 
     case_pack = product.case_pack or 1
@@ -534,6 +619,146 @@ def update_admin_opening_stock(
         "pieces_sold": pieces_sold,
         "location_id": location.id,
         "location_name": location.name
+    }
+
+@router.post("/closing-stock")
+def update_admin_closing_stock(
+    req: AdminClosingStockUpdateRequest,
+    db: Session = Depends(get_db),
+    current_admin: models.Employee = Depends(get_current_active_admin_user),
+):
+    """
+    Manually edits individual store closing stock.
+    Per Rule 1.B: The admin can manually edit Closing Stock at any time.
+    Manual edits must be saved and must not be overwritten automatically by recalculation.
+    """
+    if req.closing_stock < 0:
+        raise HTTPException(status_code=400, detail="Closing stock cannot be negative")
+
+    product = db.query(models.Product).filter(models.Product.id == req.product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    location = db.query(models.Location).filter(models.Location.id == req.location_id).first()
+    if not location:
+        raise HTTPException(status_code=404, detail="Store location not found")
+
+    year_month = req.date_from[:7] if (req.date_from and len(req.date_from) >= 7) else to_ist(datetime.utcnow()).strftime("%Y-%m")
+
+    ms = db.query(models.MonthlyStock).filter(
+        models.MonthlyStock.year_month == year_month,
+        models.MonthlyStock.location_id == req.location_id,
+        models.MonthlyStock.product_id == req.product_id,
+    ).first()
+
+    old_closing = 0
+    if not ms:
+        ms = models.MonthlyStock(
+            year_month=year_month,
+            location_id=req.location_id,
+            product_id=req.product_id,
+            opening_stock=0,
+            manual_closing_stock=req.closing_stock,
+            is_closing_manually_edited=True,
+            closing_edit_reason=req.reason,
+        )
+        db.add(ms)
+    else:
+        old_closing = ms.manual_closing_stock if ms.is_closing_manually_edited else ms.opening_stock
+        ms.manual_closing_stock = req.closing_stock
+        ms.is_closing_manually_edited = True
+        ms.closing_edit_reason = req.reason
+
+    inv = db.query(models.Inventory).filter(
+        models.Inventory.product_id == req.product_id,
+        models.Inventory.location_id == req.location_id,
+    ).with_for_update().first()
+
+    old_stock = 0
+    if not inv:
+        inv = models.Inventory(
+            product_id=req.product_id,
+            location_id=req.location_id,
+            quantity=req.closing_stock,
+            last_updated=datetime.utcnow()
+        )
+        db.add(inv)
+        db.flush()
+    else:
+        old_stock = inv.quantity
+        inv.quantity = req.closing_stock
+        inv.last_updated = datetime.utcnow()
+
+    diff = req.closing_stock - old_stock
+    txn = models.InventoryTransaction(
+        inventory_id=inv.id,
+        quantity_change=diff,
+        transaction_type="closing_stock_edit",
+        reference_type="admin_closing_stock_adjustment",
+        performed_by=current_admin.id
+    )
+    db.add(txn)
+
+    from ..utils.stock_service import log_admin_stock_audit
+    log_admin_stock_audit(
+        db=db,
+        admin_id=current_admin.id,
+        stock_type="STORE_CLOSING",
+        year_month=year_month,
+        location_id=req.location_id,
+        product_id=req.product_id,
+        previous_value=old_closing,
+        updated_value=req.closing_stock,
+        reason=req.reason or "Admin manual closing stock adjustment",
+    )
+    db.commit()
+
+    case_pack = product.case_pack or 1
+    return {
+        "status": "success",
+        "message": f"Successfully updated manual closing stock for [{product.name}] to {req.closing_stock} PCS at {location.name}.",
+        "product_id": product.id,
+        "product_name": product.name,
+        "index_no": product.index_no,
+        "closing_stock": req.closing_stock,
+        "closing_cases": req.closing_stock // case_pack,
+        "closing_remainder": req.closing_stock % case_pack,
+        "location_id": location.id,
+        "location_name": location.name
+    }
+
+@router.post("/rollover")
+def trigger_stock_rollover(
+    req: AdminRolloverRequest,
+    db: Session = Depends(get_db),
+    current_admin: models.Employee = Depends(get_current_active_admin_user),
+):
+    """
+    Month-End Stock Rollover:
+    On the first day of each new month (or triggered by admin):
+    New Month Opening Stock = Previous Month's Final Closing Stock
+    Preserves all transaction records and historical snapshots without overwriting.
+    """
+    from ..utils.stock_service import get_current_year_month, get_previous_year_month, get_or_create_monthly_stock
+    current_ym = get_current_year_month()
+    from_ym = req.from_year_month or get_previous_year_month(current_ym)
+    to_ym = req.to_year_month or current_ym
+
+    locations = db.query(models.Location).filter(models.Location.is_active == True).all()
+    products = db.query(models.Product).filter(models.Product.is_active == True).all()
+
+    rollover_count = 0
+    for loc in locations:
+        for p in products:
+            get_or_create_monthly_stock(db, year_month=to_ym, location_id=loc.id, product_id=p.id)
+            rollover_count += 1
+
+    return {
+        "status": "success",
+        "message": f"Successfully rolled over monthly stock from {from_ym} to {to_ym} for {rollover_count} product-store combinations.",
+        "from_year_month": from_ym,
+        "to_year_month": to_ym,
+        "combinations_count": rollover_count
     }
 
 @router.get("/sales/export")

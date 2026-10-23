@@ -79,7 +79,7 @@ const PWAInstallNotification = () => {
 
   return (
     <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:w-96 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300">
-      <div className="bg-slate-900 dark:bg-slate-850 text-white p-4 rounded-2xl shadow-2xl border border-indigo-500/40 backdrop-blur-lg flex items-start gap-3.5">
+      <div className="bg-slate-900 text-white p-4 rounded-2xl shadow-2xl border border-indigo-500/40 backdrop-blur-lg flex items-start gap-3.5">
         <div className="w-12 h-12 rounded-xl bg-indigo-600 flex items-center justify-center shrink-0 p-1 shadow-md">
           <img src="/icon-192.png" alt="Safari CSD Icon" className="w-10 h-10 rounded-lg object-cover" />
         </div>

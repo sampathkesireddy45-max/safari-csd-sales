@@ -471,6 +471,20 @@ export const updateAdminOpeningStock = async (payload) => {
   });
 };
 
+export const updateAdminClosingStock = async (payload) => {
+  return await fetchApi("/admin/dashboard/closing-stock", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+};
+
+export const triggerStockRollover = async (payload = {}) => {
+  return await fetchApi("/admin/dashboard/rollover", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+};
+
 export const updateEmployeeOpeningStock = async (payload) => {
   return await fetchApi("/employees/sales-dashboard/opening-stock", {
     method: "POST",
