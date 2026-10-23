@@ -4,19 +4,32 @@
   "description": "Real-time stock telemetry, sales register, and inter-store transfers for Safari CSD military canteens",
   "icons": [
     {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    },
+    {
       "src": "/icon-192.svg",
       "type": "image/svg+xml",
       "sizes": "192x192",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "/icon-512.svg",
       "type": "image/svg+xml",
       "sizes": "512x512",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ],
   "start_url": "/",
+  "id": "/",
   "background_color": "#0f172a",
   "theme_color": "#1e40af",
   "display": "standalone",

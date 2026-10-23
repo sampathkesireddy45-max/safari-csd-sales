@@ -19,6 +19,7 @@ import SystemHealth from "./pages/SystemHealth";
 import AdminSales from "./pages/AdminSales";
 import EmployeeSalesDashboard from "./pages/EmployeeSalesDashboard";
 import StockTransfers from "./pages/StockTransfers";
+import PWAInstallNotification from "./components/PWAInstallNotification";
 
 function App() {
   return (
@@ -26,6 +27,7 @@ function App() {
       <ThemeProvider>
       <AuthProvider>
         <ToastProvider>
+          <PWAInstallNotification />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/admin/dashboard" element={<AdminDashboard />} />

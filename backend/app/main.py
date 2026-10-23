@@ -125,6 +125,33 @@ if FRONTEND_DIST.exists() and (FRONTEND_DIST / "index.html").exists():
     if (FRONTEND_DIST / "assets").exists():
         app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
 
+    # PWA Service Worker (Explicit headers required by modern browsers)
+    @app.api_route("/sw.js", methods=["GET", "HEAD"])
+    async def serve_sw():
+        sw_path = FRONTEND_DIST / "sw.js"
+        if sw_path.exists():
+            return FileResponse(
+                sw_path,
+                media_type="application/javascript",
+                headers={
+                    "Service-Worker-Allowed": "/",
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                }
+            )
+        return FileResponse(FRONTEND_DIST / "index.html")
+
+    # Web App Manifest
+    @app.api_route("/manifest.json", methods=["GET", "HEAD"])
+    async def serve_manifest():
+        m_path = FRONTEND_DIST / "manifest.json"
+        if m_path.exists():
+            return FileResponse(
+                m_path,
+                media_type="application/manifest+json",
+                headers={"Cache-Control": "no-cache"}
+            )
+        return FileResponse(FRONTEND_DIST / "index.html")
+
     @app.api_route("/", methods=["GET", "HEAD"])
     async def serve_index():
         return FileResponse(FRONTEND_DIST / "index.html")
