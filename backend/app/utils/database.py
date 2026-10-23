@@ -10,8 +10,13 @@ DEFAULT_SQLITE_PATH = BASE_BACKEND_DIR / "test.db"
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     DATABASE_URL = f"sqlite:///{DEFAULT_SQLITE_PATH}"
-elif DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+else:
+    # Render and cloud providers supply postgres:// or postgresql://
+    # In SQLAlchemy 2.x, explicit driver 'postgresql+psycopg2://' avoids ModuleNotFoundError: No module named 'psycopg'
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif DATABASE_URL.startswith("postgresql://") and "+psycopg" not in DATABASE_URL:
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 if "sqlite" in DATABASE_URL:
     engine = create_engine(
