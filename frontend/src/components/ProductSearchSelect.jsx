@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Search, Luggage, X, Check, Tag, AlertTriangle } from "lucide-react";
+import { Search, Luggage, X, Check, Tag, AlertTriangle, AlertCircle, CheckCircle2 } from "lucide-react";
 
 const ProductSearchSelect = ({
   products = [],
@@ -104,18 +104,29 @@ const ProductSearchSelect = ({
                 {selectedProduct.total_stock !== undefined && (
                   <>
                     <span className="text-slate-300">•</span>
-                    {selectedProduct.total_stock < 5 ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold text-[10px] bg-red-100 text-red-700 border border-red-300">
-                        <AlertTriangle className="w-3 h-3 text-red-600 shrink-0" />
-                        {selectedProduct.total_stock === 0 ? "Out of Stock (0)" : `Low Stock: ${selectedProduct.total_stock} PCS`}
+                    {selectedProduct.total_stock <= 0 ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold text-[10px] bg-rose-100 text-rose-700 border border-rose-300">
+                        <AlertCircle className="w-3 h-3 text-rose-600 shrink-0" />
+                        Out of Stock (0)
                       </span>
-                    ) : selectedProduct.total_stock > 10 ? (
+                    ) : selectedProduct.total_stock <= (selectedProduct.case_pack || 1) ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold text-[10px] bg-amber-100 text-amber-800 border border-amber-300">
-                        Overstock: {selectedProduct.total_stock} PCS
+                        <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                        Low Stock: {selectedProduct.total_stock} PCS (≤ 1 Case)
+                      </span>
+                    ) : selectedProduct.total_stock > 15 ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold text-[10px] bg-purple-100 text-purple-800 border border-purple-300">
+                        <PackageCheck className="w-3 h-3 text-purple-600 shrink-0" />
+                        Overstock: {selectedProduct.total_stock} PCS (&gt;15 pcs)
+                      </span>
+                    ) : selectedProduct.total_stock > 2 * (selectedProduct.case_pack || 1) ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                        Healthy: {selectedProduct.total_stock} PCS (&gt;2 Cases)
                       </span>
                     ) : (
-                      <span className="text-emerald-700 font-semibold text-[10px]">
-                        Stock: {selectedProduct.total_stock} PCS (Optimal)
+                      <span className="text-blue-700 font-semibold text-[10px] bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                        In Stock: {selectedProduct.total_stock} PCS (1–2 Cases)
                       </span>
                     )}
                   </>
@@ -234,17 +245,28 @@ const ProductSearchSelect = ({
                             {p.total_stock !== undefined && (
                               <>
                                 <span className="text-slate-300">•</span>
-                                {p.total_stock < 5 ? (
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-red-100 text-red-700 border border-red-200">
-                                    <AlertTriangle className="w-2.5 h-2.5 text-red-600 shrink-0" />
-                                    {p.total_stock === 0 ? "Out of Stock" : `Low Stock: ${p.total_stock} pcs`}
+                                {p.total_stock <= 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-100 text-rose-700 border border-rose-200">
+                                    <AlertCircle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                    Out of Stock (0)
                                   </span>
-                                ) : p.total_stock > 10 ? (
+                                ) : p.total_stock <= (p.case_pack || 1) ? (
                                   <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                    <AlertTriangle className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                                    Low Stock: {p.total_stock} pcs (≤1 Cs)
+                                  </span>
+                                ) : p.total_stock > 15 ? (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                                    <PackageCheck className="w-2.5 h-2.5 text-purple-600 shrink-0" />
                                     Overstock: {p.total_stock} pcs
                                   </span>
+                                ) : p.total_stock > 2 * (p.case_pack || 1) ? (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                    Healthy: {p.total_stock} pcs
+                                  </span>
                                 ) : (
-                                  <span className="text-emerald-700 font-medium text-[10px]">
+                                  <span className="text-blue-700 font-medium text-[10px]">
                                     Stock: {p.total_stock} pcs
                                   </span>
                                 )}

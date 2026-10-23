@@ -29,6 +29,7 @@ import {
   TrendingUp,
   Calendar,
   AlertTriangle,
+  AlertCircle,
   Eye,
   ArrowRight,
   ShieldCheck,
@@ -81,7 +82,7 @@ const AdminDashboard = () => {
   const [catalogUnit, setCatalogUnit] = useState("pieces"); // "pieces" or "cases"
   const [brandFilter, setBrandFilter] = useState("ALL");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
-  const [stockFilter, setStockFilter] = useState("ALL"); // "ALL" | "LOW" | "OVERSTOCK"
+  const [stockFilter, setStockFilter] = useState("ALL"); // "ALL" | "HEALTHY" | "LOW" | "OUT"
 
   // Price Edit Modal State
   const [editingPriceProduct, setEditingPriceProduct] = useState(null);
@@ -750,34 +751,64 @@ const AdminDashboard = () => {
                   ))}
                 </div>
 
-                {/* Low Stock Alert Filter Button (<5 pcs) */}
+                {/* Healthy Stock Button (>2 Cases) */}
                 <button
                   type="button"
-                  onClick={() => setStockFilter(stockFilter === "LOW" ? "ALL" : "LOW")}
+                  onClick={() => setStockFilter(stockFilter === "HEALTHY" ? "ALL" : "HEALTHY")}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold border transition shadow-sm ${
-                    stockFilter === "LOW"
-                      ? "bg-red-600 text-white border-red-600 shadow-red-200"
-                      : "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                    stockFilter === "HEALTHY"
+                      ? "bg-emerald-600 text-white border-emerald-600 shadow-emerald-200"
+                      : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
                   }`}
-                  title="Filter to show only products with less than 5 pieces in stock"
+                  title="Filter to show only products with Healthy Stock (> 2 Cases and ≤ 15 pcs)"
                 >
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  <span>Low Stock (&lt;5 pcs): {products.filter((p) => (p.total_stock ?? 0) < 5).length}</span>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Healthy (&gt;2 Cs): {products.filter((p) => (p.total_stock ?? 0) > 2 * (p.case_pack || 1) && (p.total_stock ?? 0) <= 15).length}</span>
                 </button>
 
-                {/* Overstock Filter Button (>10 pcs) */}
+                {/* Overstock Filter Button (>15 pcs) */}
                 <button
                   type="button"
                   onClick={() => setStockFilter(stockFilter === "OVERSTOCK" ? "ALL" : "OVERSTOCK")}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold border transition shadow-sm ${
                     stockFilter === "OVERSTOCK"
+                      ? "bg-purple-600 text-white border-purple-600 shadow-purple-200"
+                      : "bg-purple-50 text-purple-800 border-purple-200 hover:bg-purple-100"
+                  }`}
+                  title="Filter to show only products with Overstock (> 15 pieces)"
+                >
+                  <PackageCheck className="w-3.5 h-3.5" />
+                  <span>Overstock (&gt;15 pcs): {products.filter((p) => (p.total_stock ?? 0) > 15).length}</span>
+                </button>
+
+                {/* Low Stock Alert Filter Button (≤1 Case) */}
+                <button
+                  type="button"
+                  onClick={() => setStockFilter(stockFilter === "LOW" ? "ALL" : "LOW")}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold border transition shadow-sm ${
+                    stockFilter === "LOW"
                       ? "bg-amber-600 text-white border-amber-600 shadow-amber-200"
                       : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
                   }`}
-                  title="Filter to show only products with greater than 10 pieces in stock (Overstock)"
+                  title="Filter to show only products with Low Stock (≤ 1 Case Pack)"
                 >
-                  <PackageCheck className="w-3.5 h-3.5" />
-                  <span>Overstock (&gt;10 pcs): {products.filter((p) => (p.total_stock ?? 0) > 10).length}</span>
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>Low Stock (≤1 Cs): {products.filter((p) => (p.total_stock ?? 0) > 0 && (p.total_stock ?? 0) <= (p.case_pack || 1)).length}</span>
+                </button>
+
+                {/* Out of Stock Filter Button (0 pcs) */}
+                <button
+                  type="button"
+                  onClick={() => setStockFilter(stockFilter === "OUT" ? "ALL" : "OUT")}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold border transition shadow-sm ${
+                    stockFilter === "OUT"
+                      ? "bg-rose-600 text-white border-rose-600 shadow-rose-200"
+                      : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
+                  }`}
+                  title="Filter to show only products with 0 pieces in stock"
+                >
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>Out of Stock (0): {products.filter((p) => (p.total_stock ?? 0) <= 0).length}</span>
                 </button>
               </div>
 
@@ -814,8 +845,12 @@ const AdminDashboard = () => {
                 <tbody className="divide-y divide-slate-100">
                   {products
                     .filter((p) => {
-                      if (stockFilter === "LOW" && (p.total_stock ?? 0) >= 5) return false;
-                      if (stockFilter === "OVERSTOCK" && (p.total_stock ?? 0) <= 10) return false;
+                      const pack = p.case_pack || 1;
+                      const stock = p.total_stock ?? 0;
+                      if (stockFilter === "OVERSTOCK" && stock <= 15) return false;
+                      if (stockFilter === "HEALTHY" && (stock <= 2 * pack || stock > 15)) return false;
+                      if (stockFilter === "LOW" && (stock <= 0 || stock > pack)) return false;
+                      if (stockFilter === "OUT" && stock > 0) return false;
                       if (brandFilter !== "ALL" && p.brand?.toUpperCase() !== brandFilter) return false;
                       if (categoryFilter !== "ALL" && p.category?.toUpperCase() !== categoryFilter) return false;
                       if (!productSearch.trim()) return true;
@@ -903,36 +938,55 @@ const AdminDashboard = () => {
                             </div>
                           </td>
 
-                          {/* Stock Status (Separate Column: Low Stock <5 / Overstock >10 / Normal 5-10) */}
+                          {/* Stock Status (Automated Safety Badges: Healthy >2 Cs, Low Stock ≤1 Cs, Out of Stock 0) */}
                           <td className="px-5 py-3 text-center font-mono whitespace-nowrap">
-                            {(p.total_stock ?? 0) < 5 ? (
+                            {(p.total_stock ?? 0) <= 0 ? (
                               <div className="flex flex-col items-center gap-0.5">
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold text-[11px] bg-red-100 text-red-700 border border-red-300 shadow-xs">
-                                  <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
-                                  <span>{(p.total_stock ?? 0) === 0 ? "Out of Stock (0)" : "Low Stock (<5)"}</span>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold text-[11px] bg-rose-100 text-rose-700 border border-rose-300 shadow-xs">
+                                  <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                  <span>Out of Stock (0)</span>
                                 </span>
-                                <span className="text-[10px] text-red-600 font-bold">
-                                  {(p.total_stock ?? 0) === 0 ? "Needs Restocking" : `Only ${p.total_stock} pcs left`}
+                                <span className="text-[10px] text-rose-600 font-bold">
+                                  0 pcs • Needs Restocking
                                 </span>
                               </div>
-                            ) : (p.total_stock ?? 0) > 10 ? (
+                            ) : (p.total_stock ?? 0) <= pack ? (
                               <div className="flex flex-col items-center gap-0.5">
                                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold text-[11px] bg-amber-100 text-amber-800 border border-amber-300 shadow-xs">
-                                  <PackageCheck className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                                  <span>Overstock (&gt;10)</span>
+                                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                  <span>Low Stock (≤ 1 Cs)</span>
                                 </span>
-                                <span className="text-[10px] text-amber-700 font-medium">
+                                <span className="text-[10px] text-amber-700 font-bold">
+                                  Only {p.total_stock} pcs left (pack: {pack})
+                                </span>
+                              </div>
+                            ) : (p.total_stock ?? 0) > 15 ? (
+                              <div className="flex flex-col items-center gap-0.5">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold text-[11px] bg-purple-100 text-purple-800 border border-purple-300 shadow-xs">
+                                  <PackageCheck className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                                  <span>Overstock (&gt;15 pcs)</span>
+                                </span>
+                                <span className="text-[10px] text-purple-700 font-medium">
                                   High Inventory ({p.total_stock} pcs)
+                                </span>
+                              </div>
+                            ) : (p.total_stock ?? 0) > 2 * pack ? (
+                              <div className="flex flex-col items-center gap-0.5">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold text-[11px] bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-xs">
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span>Healthy (&gt; 2 Cs)</span>
+                                </span>
+                                <span className="text-[10px] text-emerald-700 font-normal">
+                                  {Math.floor((p.total_stock ?? 0) / pack)} Cases ({p.total_stock} pcs)
                                 </span>
                               </div>
                             ) : (
                               <div className="flex flex-col items-center gap-0.5">
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-semibold text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-200">
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                  <span>Normal (5–10)</span>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-semibold text-[11px] bg-blue-50 text-blue-700 border border-blue-200 shadow-xs">
+                                  <span>In Stock (1–2 Cs)</span>
                                 </span>
-                                <span className="text-[10px] text-emerald-700 font-normal">
-                                  Optimal Stock
+                                <span className="text-[10px] text-slate-500 font-normal">
+                                  {p.total_stock} pcs ({Math.floor((p.total_stock ?? 0) / pack)} cs)
                                 </span>
                               </div>
                             )}

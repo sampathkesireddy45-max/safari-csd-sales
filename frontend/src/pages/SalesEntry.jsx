@@ -317,28 +317,50 @@ const SalesEntry = () => {
                               </span>
                             </div>
                             <div className="flex items-center gap-1.5">
-                              <span
-                                className={`font-mono font-bold px-2 py-0.5 rounded text-[11px] ${
-                                  getProductStock(item.productId) === 0
-                                    ? "bg-red-100 text-red-800 border border-red-300"
-                                    : getProductStock(item.productId) < 5
-                                    ? "bg-amber-100 text-amber-800 border border-amber-300"
-                                    : "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                                }`}
-                              >
-                                {getProductStock(item.productId)} PCS
-                                {getProduct(item.productId)?.case_pack > 1 && (
-                                  <span className="ml-1 opacity-80 font-normal">
-                                    (≈ {Math.floor(getProductStock(item.productId) / getProduct(item.productId).case_pack)} cases)
-                                  </span>
-                                )}
-                              </span>
-                              {getProductStock(item.productId) === 0 && (
-                                <span className="text-[10px] font-bold text-red-600 uppercase">Out of Stock</span>
-                              )}
-                              {getProductStock(item.productId) > 0 && getProductStock(item.productId) < 5 && (
-                                <span className="text-[10px] font-bold text-amber-600 uppercase">Low Stock</span>
-                              )}
+                              {(() => {
+                                const stock = getProductStock(item.productId);
+                                const pack = getProduct(item.productId)?.case_pack || 1;
+                                const isOut = stock <= 0;
+                                const isLow = stock > 0 && stock <= pack;
+                                const isOverstock = stock > 15;
+                                const isHealthy = !isOverstock && stock > 2 * pack;
+                                return (
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span
+                                      className={`font-mono font-bold px-2 py-0.5 rounded text-[11px] ${
+                                        isOut
+                                          ? "bg-rose-100 text-rose-800 border border-rose-300"
+                                          : isLow
+                                          ? "bg-amber-100 text-amber-800 border border-amber-300"
+                                          : isOverstock
+                                          ? "bg-purple-100 text-purple-800 border border-purple-300"
+                                          : isHealthy
+                                          ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                          : "bg-blue-50 text-blue-800 border border-blue-200"
+                                      }`}
+                                    >
+                                      {stock} PCS
+                                      {pack > 1 && (
+                                        <span className="ml-1 opacity-80 font-normal">
+                                          (📦 {Math.floor(stock / pack)} cases)
+                                        </span>
+                                      )}
+                                    </span>
+                                    {isOut && (
+                                      <span className="text-[10px] font-bold text-rose-600 uppercase">Out of Stock (0)</span>
+                                    )}
+                                    {isLow && (
+                                      <span className="text-[10px] font-bold text-amber-600 uppercase">Low Stock (≤ 1 Case)</span>
+                                    )}
+                                    {isOverstock && (
+                                      <span className="text-[10px] font-bold text-purple-600 uppercase">Overstock (&gt;15 pcs)</span>
+                                    )}
+                                    {isHealthy && (
+                                      <span className="text-[10px] font-bold text-emerald-600 uppercase">Healthy (&gt; 2 Cases)</span>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
                         )}

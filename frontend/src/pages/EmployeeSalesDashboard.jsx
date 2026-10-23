@@ -139,7 +139,7 @@ const EmployeeSalesDashboard = () => {
       if (stockStatusFilter === "SOLD") return (item.my_pieces_sold > 0 || item.store_pieces_sold > 0);
       if (stockStatusFilter === "LOW") return item.status === "low_stock";
       if (stockStatusFilter === "OUT") return item.status === "out_of_stock";
-      if (stockStatusFilter === "OVERFLOW") return item.status === "overflow";
+      if (stockStatusFilter === "OVERSTOCK" || stockStatusFilter === "OVERFLOW") return (item.status === "overstock" || item.status === "overflow" || (item.store_closing_stock ?? 0) > 15);
       if (stockStatusFilter === "HEALTHY") return item.status === "healthy";
       return true;
     });
@@ -337,15 +337,15 @@ const EmployeeSalesDashboard = () => {
               <div className="grid grid-cols-3 gap-1 text-center py-0.5">
                 <div className="bg-rose-50 rounded-lg p-1 border border-rose-100">
                   <span className="block text-xs font-black text-rose-700">{summary.out_of_stock_count ?? 0}</span>
-                  <span className="block text-[9px] font-bold text-rose-500">Out (0)</span>
+                  <span className="block text-[9px] font-bold text-rose-500">Out (0 pcs)</span>
                 </div>
                 <div className="bg-amber-50 rounded-lg p-1 border border-amber-100">
                   <span className="block text-xs font-black text-amber-700">{summary.low_stock_count ?? 0}</span>
-                  <span className="block text-[9px] font-bold text-amber-500">Low (&lt;5)</span>
+                  <span className="block text-[9px] font-bold text-amber-500">Low (≤1 Case)</span>
                 </div>
                 <div className="bg-emerald-50 rounded-lg p-1 border border-emerald-100">
                   <span className="block text-xs font-black text-emerald-700">{summary.healthy_stock_count ?? 0}</span>
-                  <span className="block text-[9px] font-bold text-emerald-500">Optimal</span>
+                  <span className="block text-[9px] font-bold text-emerald-500">Healthy (&gt;2 Cs)</span>
                 </div>
               </div>
               <div className="text-[10px] text-slate-400 text-center mt-1">
@@ -411,10 +411,10 @@ const EmployeeSalesDashboard = () => {
                 {[
                   { id: "ALL", label: "All Items" },
                   { id: "SOLD", label: "Sold Items" },
-                  { id: "LOW", label: `Low Stock (${summary.low_stock_count ?? 0})` },
+                  { id: "HEALTHY", label: `Healthy >2 Cs (${summary.healthy_stock_count ?? 0})` },
+                  { id: "OVERSTOCK", label: `Overstock >15 (${summary.overflow_stock_count ?? 0})` },
+                  { id: "LOW", label: `Low Stock ≤1 Cs (${summary.low_stock_count ?? 0})` },
                   { id: "OUT", label: `Out of Stock (${summary.out_of_stock_count ?? 0})` },
-                  { id: "OVERFLOW", label: `Overflow (${summary.overflow_stock_count ?? 0})` },
-                  { id: "HEALTHY", label: `Healthy (${summary.healthy_stock_count ?? 0})` },
                 ].map((f) => (
                   <button
                     key={f.id}
@@ -492,10 +492,12 @@ const EmployeeSalesDashboard = () => {
                         const overallOpening = item.overall_opening_stock ?? 0;
                         const mySold = item.my_pieces_sold ?? item.pieces_sold ?? 0;
 
-                        const isOut = storeClosing === 0;
-                        const isLow = storeClosing > 0 && storeClosing < 5;
-                        const isOverflow = storeClosing > 10;
-                        const isHealthy = storeClosing >= 5 && storeClosing <= 10;
+                        const pack = item.case_pack || 1;
+                        const isOut = storeClosing <= 0;
+                        const isLow = storeClosing > 0 && storeClosing <= pack;
+                        const isOverstock = storeClosing > 15;
+                        const isHealthy = !isOverstock && storeClosing > 2 * pack;
+                        const isModerate = !isOverstock && storeClosing > pack && storeClosing <= 2 * pack;
 
                         return (
                           <tr
@@ -570,27 +572,32 @@ const EmployeeSalesDashboard = () => {
                             {/* Stock Status Badge */}
                             <td className="px-4 py-3 text-center">
                               {isOut && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
-                                  <AlertOctagon className="w-3 h-3" />
-                                  <span>Out (0)</span>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 shadow-xs">
+                                  <AlertOctagon className="w-3 h-3 text-rose-600" />
+                                  <span>Out of Stock (0)</span>
                                 </span>
                               )}
                               {isLow && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                                  <AlertTriangle className="w-3 h-3" />
-                                  <span>Low (&lt;5)</span>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 shadow-xs">
+                                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                  <span>Low Stock (≤1 Cs: {storeClosing} pcs)</span>
                                 </span>
                               )}
-                              {isOverflow && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
-                                  <Layers className="w-3 h-3" />
-                                  <span>&gt;10</span>
+                              {isOverstock && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-300 shadow-xs">
+                                  <Layers className="w-3 h-3 text-purple-600" />
+                                  <span>Overstock (&gt;15 pcs: {storeClosing})</span>
                                 </span>
                               )}
                               {isHealthy && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                  <CheckCircle2 className="w-3 h-3" />
-                                  <span>Optimal</span>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-xs">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  <span>Healthy (&gt;2 Cases)</span>
+                                </span>
+                              )}
+                              {isModerate && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 shadow-xs">
+                                  <span>In Stock (1–2 Cases)</span>
                                 </span>
                               )}
                             </td>

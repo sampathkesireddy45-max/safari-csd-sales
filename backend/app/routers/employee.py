@@ -270,6 +270,7 @@ def get_employee_sales_dashboard(
     out_of_stock_count = 0
     overflow_stock_count = 0
     healthy_stock_count = 0
+    moderate_stock_count = 0
 
     for p in products:
         rate = p.selling_rate if p.selling_rate is not None else (p.rate_per_pc or 0.0)
@@ -292,20 +293,27 @@ def get_employee_sales_dashboard(
         my_sold = emp_info["pieces_sold"]
         my_rev = round(my_sold * rate, 2)
 
-        # Status badge based on store stock (or overall if all stores selected)
+        # Automated color-coded safety level evaluation:
+        # - Out of Stock: 0 Pieces (check_stock <= 0)
+        # - Low Stock: <= 1 Case Pack (0 < check_stock <= pack)
+        # - Healthy: > 2 Cases (check_stock > 2 * pack)
+        # - Moderate: 1-2 Cases (pack < check_stock <= 2 * pack)
         check_stock = store_closing
-        if check_stock == 0:
+        if check_stock <= 0:
             status_tag = "out_of_stock"
             out_of_stock_count += 1
-        elif check_stock < 5:
+        elif check_stock <= pack:
             status_tag = "low_stock"
             low_stock_count += 1
-        elif check_stock > 10:
-            status_tag = "overflow"
+        elif check_stock > 15:
+            status_tag = "overstock"
             overflow_stock_count += 1
-        else:
+        elif check_stock > 2 * pack:
             status_tag = "healthy"
             healthy_stock_count += 1
+        else:
+            status_tag = "moderate"
+            moderate_stock_count += 1
 
         total_my_sold += my_sold
         total_my_revenue = round(total_my_revenue + my_rev, 2)
@@ -452,6 +460,7 @@ def get_employee_sales_dashboard(
 
             "low_stock_count": low_stock_count,
             "out_of_stock_count": out_of_stock_count,
+            "moderate_stock_count": moderate_stock_count,
             "overflow_stock_count": overflow_stock_count,
             "healthy_stock_count": healthy_stock_count,
             "total_catalog_items": len(products),

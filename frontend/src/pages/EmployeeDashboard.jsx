@@ -16,6 +16,8 @@ import {
   TrendingUp,
   Calendar,
   AlertTriangle,
+  AlertCircle,
+  CheckCircle2,
   Package,
   ArrowRight,
   ShoppingBag,
@@ -137,18 +139,35 @@ const EmployeeDashboard = () => {
     fetchStats();
   };
 
-  const lowStockItemsCount = (stats.currentStock || []).filter(
-    (item) => (item.quantity || 0) < 5
+  const outOfStockItemsCount = (stats.currentStock || []).filter(
+    (item) => (item.quantity || 0) <= 0
   ).length;
 
-  const overStockItemsCount = (stats.currentStock || []).filter(
-    (item) => (item.quantity || 0) > 10
-  ).length;
+  const lowStockItemsCount = (stats.currentStock || []).filter((item) => {
+    const pack = item.case_pack || 1;
+    const qty = item.quantity || 0;
+    return qty > 0 && qty <= pack;
+  }).length;
 
-  // Filter current stock by Index No, product name, low stock, and overstock
+  const overStockItemsCount = (stats.currentStock || []).filter((item) => {
+    const qty = item.quantity || 0;
+    return qty > 15;
+  }).length;
+
+  const healthyStockItemsCount = (stats.currentStock || []).filter((item) => {
+    const pack = item.case_pack || 1;
+    const qty = item.quantity || 0;
+    return qty > 2 * pack && qty <= 15;
+  }).length;
+
+  // Filter current stock by Index No, product name, and safety levels
   const filteredStock = (stats.currentStock || []).filter((item) => {
-    if (stockFilter === "LOW" && (item.quantity || 0) >= 5) return false;
-    if (stockFilter === "OVERSTOCK" && (item.quantity || 0) <= 10) return false;
+    const pack = item.case_pack || 1;
+    const qty = item.quantity || 0;
+    if (stockFilter === "OVERSTOCK" && qty <= 15) return false;
+    if (stockFilter === "HEALTHY" && (qty <= 2 * pack || qty > 15)) return false;
+    if (stockFilter === "LOW" && (qty <= 0 || qty > pack)) return false;
+    if (stockFilter === "OUT" && qty > 0) return false;
     if (!stockSearchTerm.trim()) return true;
     const term = stockSearchTerm.toLowerCase().trim();
     const indexMatch = item.index_no && String(item.index_no).toLowerCase().includes(term);
@@ -324,16 +343,16 @@ const EmployeeDashboard = () => {
 
                 <button
                   type="button"
-                  onClick={() => setStockFilter(stockFilter === "LOW" ? "ALL" : "LOW")}
+                  onClick={() => setStockFilter(stockFilter === "HEALTHY" ? "ALL" : "HEALTHY")}
                   className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border transition shadow-sm shrink-0 ${
-                    stockFilter === "LOW"
-                      ? "bg-red-600 text-white border-red-600 shadow-red-200"
-                      : "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                    stockFilter === "HEALTHY"
+                      ? "bg-emerald-600 text-white border-emerald-600 shadow-emerald-200"
+                      : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
                   }`}
-                  title="Filter to show only products with less than 5 pieces"
+                  title="Filter to show only Healthy Stock (>2 Cases)"
                 >
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  <span>Low Stock (&lt;5): {lowStockItemsCount}</span>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Healthy (&gt;2 Cs): {healthyStockItemsCount}</span>
                 </button>
 
                 <button
@@ -341,13 +360,41 @@ const EmployeeDashboard = () => {
                   onClick={() => setStockFilter(stockFilter === "OVERSTOCK" ? "ALL" : "OVERSTOCK")}
                   className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border transition shadow-sm shrink-0 ${
                     stockFilter === "OVERSTOCK"
+                      ? "bg-purple-600 text-white border-purple-600 shadow-purple-200"
+                      : "bg-purple-50 text-purple-800 border-purple-200 hover:bg-purple-100"
+                  }`}
+                  title="Filter to show only products with greater than 15 pieces (Overstock)"
+                >
+                  <PackageCheck className="w-3.5 h-3.5" />
+                  <span>Overstock (&gt;15): {overStockItemsCount}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setStockFilter(stockFilter === "LOW" ? "ALL" : "LOW")}
+                  className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border transition shadow-sm shrink-0 ${
+                    stockFilter === "LOW"
                       ? "bg-amber-600 text-white border-amber-600 shadow-amber-200"
                       : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
                   }`}
-                  title="Filter to show only products with greater than 10 pieces (Overstock)"
+                  title="Filter to show only Low Stock (≤1 Case Pack)"
                 >
-                  <PackageCheck className="w-3.5 h-3.5" />
-                  <span>Overstock (&gt;10): {overStockItemsCount}</span>
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>Low Stock (≤1 Cs): {lowStockItemsCount}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setStockFilter(stockFilter === "OUT" ? "ALL" : "OUT")}
+                  className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border transition shadow-sm shrink-0 ${
+                    stockFilter === "OUT"
+                      ? "bg-rose-600 text-white border-rose-600 shadow-rose-200"
+                      : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
+                  }`}
+                  title="Filter to show only Out of Stock (0 pieces)"
+                >
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>Out of Stock (0): {outOfStockItemsCount}</span>
                 </button>
 
                 <button
@@ -364,17 +411,26 @@ const EmployeeDashboard = () => {
             {filteredStock && filteredStock.length > 0 ? (
               <div className="divide-y divide-slate-100 max-h-[32rem] overflow-y-auto">
                 {filteredStock.map((item) => {
-                  const isLowStock = (item.quantity ?? 0) < 5;
-                  const isOverStock = (item.quantity ?? 0) > 10;
+                  const pack = item.case_pack || 1;
+                  const qty = item.quantity ?? 0;
+                  const isOut = qty <= 0;
+                  const isLow = qty > 0 && qty <= pack;
+                  const isOverStock = qty > 15;
+                  const isHealthy = !isOverStock && qty > 2 * pack;
+                  const isModerate = !isOverStock && qty > pack && qty <= 2 * pack;
                   return (
                     <div
                       key={item.id}
                       className={`p-4 sm:px-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition ${
-                        isLowStock
-                          ? "bg-red-50/50 hover:bg-red-50/80 border-l-4 border-l-red-500"
+                        isOut
+                          ? "bg-rose-50/60 hover:bg-rose-50/90 border-l-4 border-l-rose-500"
+                          : isLow
+                          ? "bg-amber-50/50 hover:bg-amber-50/80 border-l-4 border-l-amber-500"
                           : isOverStock
-                          ? "bg-amber-50/40 hover:bg-amber-50/70 border-l-4 border-l-amber-500"
-                          : "hover:bg-slate-50/80"
+                          ? "bg-purple-50/40 hover:bg-purple-50/70 border-l-4 border-l-purple-500"
+                          : isHealthy
+                          ? "hover:bg-emerald-50/20 border-l-4 border-l-emerald-500"
+                          : "hover:bg-slate-50/80 border-l-4 border-l-slate-300"
                       }`}
                     >
                       <div>
@@ -387,16 +443,33 @@ const EmployeeDashboard = () => {
                           <h4 className="text-sm font-semibold text-slate-900">
                             {item.product_name}
                           </h4>
-                          {isLowStock && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-red-600 text-white shadow-xs uppercase">
+                          {isOut && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-600 text-white shadow-xs uppercase">
+                              <AlertCircle className="w-3 h-3" />
+                              Out of Stock
+                            </span>
+                          )}
+                          {isLow && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-600 text-white shadow-xs uppercase">
                               <AlertTriangle className="w-3 h-3" />
-                              Low Stock
+                              Low Stock (≤1 Cs)
                             </span>
                           )}
                           {isOverStock && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-600 text-white shadow-xs uppercase">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-600 text-white shadow-xs uppercase">
                               <PackageCheck className="w-3 h-3" />
-                              Overstock
+                              Overstock (&gt;15)
+                            </span>
+                          )}
+                          {isHealthy && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-600 text-white shadow-xs uppercase">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Healthy (&gt;2 Cs)
+                            </span>
+                          )}
+                          {isModerate && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-100 text-blue-800 shadow-xs uppercase">
+                              In Stock (1–2 Cs)
                             </span>
                           )}
                         </div>
@@ -417,34 +490,59 @@ const EmployeeDashboard = () => {
 
                       <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2.5 self-end sm:self-center">
                         <div className="text-right">
-                          {isLowStock ? (
+                          {isOut ? (
                             <div className="flex flex-col items-end gap-1">
-                              <span className="inline-flex items-center gap-1.5 text-xs font-bold font-mono px-3 py-1 rounded-xl border bg-red-100 text-red-700 border-red-300 shadow-xs">
-                                <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
-                                {item.quantity === 0 ? "0 PCS (OUT OF STOCK)" : `LOW STOCK: ${item.quantity} PCS`}
+                              <span className="inline-flex items-center gap-1.5 text-xs font-bold font-mono px-3 py-1 rounded-xl border bg-rose-100 text-rose-700 border-rose-300 shadow-xs">
+                                <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                0 PCS (OUT OF STOCK)
                               </span>
-                              <span className="text-[10px] text-red-600 font-bold">
-                                {item.quantity === 0 ? "Needs Restocking" : `Only ${item.quantity} pcs left (<5)`}
+                              <span className="text-[10px] text-rose-600 font-bold">
+                                Needs Restocking
+                              </span>
+                            </div>
+                          ) : isLow ? (
+                            <div className="flex flex-col items-end gap-1">
+                              <span className="inline-flex items-center gap-1.5 text-xs font-bold font-mono px-3 py-1 rounded-xl border bg-amber-100 text-amber-800 border-amber-300 shadow-xs">
+                                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                LOW STOCK: {qty} PCS
+                              </span>
+                              <span className="text-[10px] text-amber-700 font-bold">
+                                Only {qty} pcs left (≤ 1 Case Pack: {pack})
                               </span>
                             </div>
                           ) : isOverStock ? (
                             <div className="flex flex-col items-end gap-1">
-                              <span className="inline-flex items-center gap-1.5 text-xs font-bold font-mono px-3 py-1 rounded-xl border bg-amber-100 text-amber-800 border-amber-300 shadow-xs">
-                                <PackageCheck className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                OVERSTOCK: {item.quantity} PCS
+                              <span className="inline-flex items-center gap-1.5 text-xs font-bold font-mono px-3 py-1 rounded-xl border bg-purple-100 text-purple-800 border-purple-300 shadow-xs">
+                                <PackageCheck className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                                OVERSTOCK: {qty} PCS
                               </span>
-                              <span className="text-[10px] text-amber-700 font-medium">
-                                High Inventory (&gt;10 pcs)
+                              <span className="text-[10px] text-purple-700 font-medium">
+                                High Inventory (&gt;15 pcs)
+                              </span>
+                            </div>
+                          ) : isHealthy ? (
+                            <div className="flex flex-col items-end gap-1">
+                              <span className="inline-flex items-center gap-1.5 text-xs font-bold font-mono px-3 py-1 rounded-xl border bg-emerald-100 text-emerald-800 border-emerald-300 shadow-xs">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                HEALTHY: {qty} PCS
+                              </span>
+                              <span className="text-[10px] text-emerald-700 font-medium">
+                                {Math.floor(qty / pack)} Cases in stock (&gt;2 Cases)
                               </span>
                             </div>
                           ) : (
-                            <span className="inline-block text-sm font-bold font-mono px-3 py-1 rounded-xl border bg-emerald-50 text-emerald-800 border-emerald-200">
-                              {item.quantity} PCS
-                            </span>
+                            <div className="flex flex-col items-end gap-1">
+                              <span className="inline-block text-xs font-bold font-mono px-3 py-1 rounded-xl border bg-blue-50 text-blue-700 border-blue-200">
+                                {qty} PCS (1–2 Cases)
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-normal">
+                                {Math.floor(qty / pack)} cs + {qty % pack} pcs
+                              </span>
+                            </div>
                           )}
-                          {item.case_pack > 1 && !isLowStock && (
+                          {pack > 1 && !isOut && (
                             <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                              ≈ {Math.floor(item.quantity / item.case_pack)} Cases ({item.quantity % item.case_pack} pcs)
+                              📦 {Math.floor(qty / pack)} Cases ({qty % pack} pcs)
                             </div>
                           )}
                         </div>

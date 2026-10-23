@@ -1,7 +1,34 @@
 # Safari CSD Sales & Stock Telemetry - Session Checkpoint
 
-**Last Saved Timestamp:** October 23, 2026 - 15:10 IST  
+**Last Saved Timestamp:** October 23, 2026 - 16:02 IST  
 **Workspace Path:** `C:\Users\sampa\overall sales`  
+
+---
+
+## 🟢🟡🔴 Automated Case-Based Safety Stock & Overstock Badges (October 23, 2026)
+- **Specification Implemented**:
+  - 🟣 **Overstock**: `> 15 Pieces` (`quantity > 15`) - Purple high-inventory warning badge (`Overstock (>15 pcs)`).
+  - 🟢 **Healthy**: `> 2 Cases` and `≤ 15 Pieces` (`quantity > 2 * case_pack && quantity <= 15`) - Emerald badge showing case quantity and count.
+  - 🟡 **Low Stock**: `≤ 1 Case Pack` (`0 < quantity <= case_pack`) - Amber warning badge displaying exact remaining pieces against case pack.
+  - 🔴 **Out of Stock**: `0 Pieces` (`quantity <= 0`) - Crimson urgent badge indicating restock required.
+  - 🔵 **Moderate / Adequate**: `1 to 2 Cases` (`case_pack < quantity <= 2 * case_pack`) - Blue in-stock indicator.
+- **Components & Endpoints Updated**:
+  - **`backend/app/routers/employee.py`**:
+    - Replaced hardcoded stock thresholds (`< 5`, `> 10`) in `/employees/sales-dashboard` with dynamic relative case pack computations (`check_stock <= pack`, `check_stock > 2 * pack`).
+    - Added `moderate_stock_count` and maintained backwards-compatible `overflow_stock_count` in API summary metrics.
+  - **`frontend/src/pages/EmployeeSalesDashboard.jsx`**:
+    - Updated Store Stock Health summary card: `Out (0 pcs)`, `Low (≤1 Case)`, `Healthy (>2 Cs)`.
+    - Added status filter buttons: `All Items`, `Sold Items`, `Healthy >2 Cs`, `Low Stock ≤1 Cs`, `Out of Stock`.
+    - Updated table row evaluation and badge styling with icons (`AlertOctagon`, `AlertTriangle`, `CheckCircle2`).
+  - **`frontend/src/pages/AdminDashboard.jsx`**:
+    - Replaced absolute `< 5` and `> 10` catalog buttons with automated case pack filters: `Healthy (>2 Cs)`, `Low Stock (≤1 Cs)`, `Out of Stock (0)`.
+    - Updated catalog table Stock Status column to render clear 4-tier visual badges with restock alerts.
+  - **`frontend/src/pages/EmployeeDashboard.jsx`**:
+    - Aligned employee stock section with case-based safety thresholds and updated filter pills and card badges.
+  - **`frontend/src/components/ProductSearchSelect.jsx`**:
+    - Synchronized selected item and dropdown stock badges with case-based safety levels.
+  - **`frontend/src/pages/SalesEntry.jsx`**:
+    - Updated live counter stock badge on retail entry form to reflect case pack safety thresholds.
 
 ---
 
