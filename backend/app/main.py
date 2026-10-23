@@ -50,8 +50,55 @@ def on_startup():
     try:
         Base.metadata.create_all(bind=engine)
         
-        # High-performance database indexing verification
+        # Schema migration: verify and add newly introduced columns to existing tables
+        from sqlalchemy import inspect
+        inspector = inspect(engine)
+        table_names = inspector.get_table_names()
+        
         with engine.connect() as conn:
+            # 1. monthly_stocks schema migration
+            if "monthly_stocks" in table_names:
+                ms_cols = {c["name"] for c in inspector.get_columns("monthly_stocks")}
+                ms_additions = [
+                    ("manual_receiving_stock", "INTEGER"),
+                    ("is_receiving_manually_edited", "BOOLEAN DEFAULT FALSE"),
+                    ("receiving_edit_reason", "TEXT"),
+                    ("manual_closing_stock", "INTEGER"),
+                    ("is_closing_manually_edited", "BOOLEAN DEFAULT FALSE"),
+                    ("closing_edit_reason", "TEXT"),
+                ]
+                for col_name, col_type in ms_additions:
+                    if col_name not in ms_cols:
+                        try:
+                            conn.execute(text(f"ALTER TABLE monthly_stocks ADD COLUMN {col_name} {col_type}"))
+                            conn.commit()
+                        except Exception:
+                            conn.rollback()
+
+            # 2. stock_transfers schema migration
+            if "stock_transfers" in table_names:
+                st_cols = {c["name"] for c in inspector.get_columns("stock_transfers")}
+                st_additions = [
+                    ("dispatched_quantity", "INTEGER DEFAULT 0"),
+                    ("received_quantity", "INTEGER"),
+                    ("has_mismatch", "BOOLEAN DEFAULT FALSE"),
+                    ("mismatch_quantity", "INTEGER DEFAULT 0"),
+                    ("mismatch_notes", "TEXT"),
+                    ("sent_by_id", "INTEGER"),
+                    ("sent_at", "TIMESTAMP"),
+                    ("received_by_id", "INTEGER"),
+                    ("received_at", "TIMESTAMP"),
+                    ("notes", "TEXT"),
+                ]
+                for col_name, col_type in st_additions:
+                    if col_name not in st_cols:
+                        try:
+                            conn.execute(text(f"ALTER TABLE stock_transfers ADD COLUMN {col_name} {col_type}"))
+                            conn.commit()
+                        except Exception:
+                            conn.rollback()
+
+            # High-performance database indexing verification
             indexes = [
                 "CREATE INDEX IF NOT EXISTS ix_inventory_product_location ON inventory (product_id, location_id)",
                 "CREATE INDEX IF NOT EXISTS ix_inventory_product_id ON inventory (product_id)",

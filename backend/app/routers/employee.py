@@ -333,7 +333,7 @@ def get_employee_sales_dashboard(
 
     current_year_month = date_from[:7] if (date_from and len(date_from) >= 7) else to_ist(datetime.utcnow()).strftime("%Y-%m")
     monthly_records = db.query(MonthlyStock).filter(MonthlyStock.year_month == current_year_month).all()
-    store_monthly_map = {ms.product_id: ms for ms in monthly_records if ms.location_id == active_loc_id}
+    store_monthly_map = {ms.product_id: ms for ms in monthly_records if selected_loc_id is not None and ms.location_id == selected_loc_id}
     overall_monthly_map = {ms.product_id: ms for ms in monthly_records if ms.location_id is None}
 
     items = []
