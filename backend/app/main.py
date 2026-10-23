@@ -40,6 +40,7 @@ app.include_router(damage_report.router)
 app.include_router(admin.router)
 app.include_router(stock_transfer.router)
 
+from . import models
 from .utils.database import Base, engine, SessionLocal
 from .models.employee import Employee
 from sqlalchemy import text

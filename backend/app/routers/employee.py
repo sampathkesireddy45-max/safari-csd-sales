@@ -12,6 +12,7 @@ from ..models.location import Location
 from ..models.product import Product
 from ..models.damage_report import DamageReport
 from ..models.damage_report_item import DamageReportItem
+from ..models.stock_transfer import StockTransfer
 from ..utils.database import get_db
 from ..utils.auth import get_current_active_user, get_current_active_admin_user
 from .. import schemas, crud
@@ -147,16 +148,23 @@ def get_employee_sales_dashboard(
 
     start_utc = None
     end_utc = None
-    if date_from:
+    if date_from and str(date_from).strip() and str(date_from).strip().lower() != "none":
         try:
-            start_utc = ist_date_to_utc_bounds(date_from, is_end_date=False)
+            start_utc = ist_date_to_utc_bounds(str(date_from).strip(), is_end_date=False)
         except Exception:
-            start_utc = datetime.fromisoformat(date_from)
-    if date_to:
+            try:
+                start_utc = datetime.fromisoformat(str(date_from).strip())
+            except Exception:
+                start_utc = None
+
+    if date_to and str(date_to).strip() and str(date_to).strip().lower() != "none":
         try:
-            end_utc = ist_date_to_utc_bounds(date_to, is_end_date=True)
+            end_utc = ist_date_to_utc_bounds(str(date_to).strip(), is_end_date=True)
         except Exception:
-            end_utc = datetime.fromisoformat(date_to) + timedelta(days=1)
+            try:
+                end_utc = datetime.fromisoformat(str(date_to).strip()) + timedelta(days=1)
+            except Exception:
+                end_utc = None
 
     # 1. All active store locations
     all_locations = db.query(Location).filter(Location.is_active == True).order_by(Location.name).all()
@@ -552,10 +560,16 @@ def update_employee_opening_stock(
     db: Session = Depends(get_db),
     current_user: Employee = Depends(get_current_active_user)
 ):
-    if current_user.role != "admin":
+    """
+    Allows store counter staff and Admin to enter/adjust opening stock.
+    - Staff are assigned to their counter and enter opening stock for their store.
+    - Admin can enter opening stock for any store.
+    - Atomic audit logging with InventoryTransaction.
+    """
+    if current_user.role != "admin" and not current_user.assigned_location_id:
         raise HTTPException(
-            status_code=403,
-            detail="Permission denied: Opening and closing stock can only be modified by an Admin."
+            status_code=400,
+            detail="Cannot update opening stock: You have no assigned retail store location."
         )
 
     target_id = current_user.id
@@ -566,7 +580,7 @@ def update_employee_opening_stock(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    target_location_id = req.location_id or employee.assigned_location_id
+    target_location_id = current_user.assigned_location_id if current_user.role != "admin" else (req.location_id or employee.assigned_location_id)
     if not target_location_id:
         raise HTTPException(
             status_code=400,
