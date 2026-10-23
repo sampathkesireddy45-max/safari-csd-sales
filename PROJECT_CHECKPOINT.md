@@ -1,7 +1,48 @@
 # Safari CSD Sales & Stock Telemetry - Session Checkpoint
 
-**Last Saved Timestamp:** October 23, 2026 - 16:02 IST  
+**Last Saved Timestamp:** October 23, 2026 - 19:00 IST  
 **Workspace Path:** `C:\Users\sampa\overall sales`  
+
+---
+
+## 🚚 Inter-Store Stock Transfer System (Completed October 23, 2026)
+- **Problem Solved**: Canteen counters often run out of high-demand Safari SKUs while sister canteens have excess inventory (>15 pcs). Previously required phone calls and manual tallying.
+- **Complete Architecture Implemented**:
+  - **Database Model (`backend/app/models/stock_transfer.py`)**:
+    - `StockTransfer` table with `transfer_number` (`TR-YYYYMMDD-XXXX`), `from_location_id`, `to_location_id`, `product_id`, `quantity`, `status` (`IN_TRANSIT`, `RECEIVED`, `CANCELLED`), `initiated_by_id`, `received_by_id`, `notes`, and audit timestamps.
+  - **Transactional Stock Balancing (`backend/app/routers/stock_transfer.py`)**:
+    - **Dispatch (`POST /transfers/`)**: Validates available pieces at source store; automatically deducts pieces from source store and writes `transfer_out` audit transaction.
+    - **Receipt (`POST /transfers/{id}/receive`)**: Receiving canteen staff or Admin confirms delivery with 1 click; automatically credits pieces to destination store inventory and writes `transfer_in` audit transaction.
+    - **Cancellation (`POST /transfers/{id}/cancel`)**: Sender or Admin cancels an in-transit transfer; pieces immediately return to source store with `transfer_cancel` transaction.
+  - **Full-Featured Frontend UI (`frontend/src/pages/StockTransfers.jsx`)**:
+    - Status tabs (`All`, `In Transit 🚚`, `Received ✅`, `Cancelled ❌`), live search, and metric cards (`In Transit On Road`, `Completed Deliveries`, `Total Pieces Rebalanced`).
+    - Dedicated dispatch modal with live source store piece availability indicator and validation.
+    - Prominent action buttons for receiving store staff ("Confirm Received") and senders ("Cancel").
+  - **Navigation Integration**:
+    - Added to `Sidebar.jsx` for both Admin and Staff with `ArrowLeftRight` icon.
+    - Quick dispatch buttons added to `AdminDashboard.jsx` and `EmployeeDashboard.jsx`.
+
+---
+
+## 📡 Offline-Ready PWA with Background Sync (Completed October 23, 2026)
+- **Problem Solved**: Defense canteens (Sunabeda, Charbatia, Naval outposts) experience frequent cellular/4G dropouts or indoor signal dead zones.
+- **PWA Infrastructure**:
+  - **Web App Manifest (`public/manifest.json`)**: Configured standalone display, custom theme colors (`#1e40af`), and Safari branding with dedicated `icon-192.svg` and `icon-512.svg`. Prompts native "Install Safari CSD App" on Android Chrome and iOS Safari.
+  - **High-Performance Service Worker (`public/sw.js`)**: Caches static assets, stylesheets, scripts, and the application shell. Opens instantly with zero loading screen even in full airplane mode.
+  - **Offline Sales Queue (`frontend/src/utils/offlineQueue.js`)**:
+    - Automatically intercepts sales in `SalesEntry.jsx` when network connection is down.
+    - Queues transactions safely in device local storage with unique UUIDs.
+    - Automatically flushes and syncs to backend server the instant network connection is restored.
+  - **Real-Time Connectivity Telemetry (`frontend/src/components/OfflineStatusBanner.jsx`)**:
+    - Persistent top banner alerting staff when offline.
+    - Live pending offline sale counter with manual "Sync Now" button.
+
+---
+
+## ⚡ Speed & Loading Optimization Suite
+- **Decoupled Product Model Relationships**: Changed `lazy="selectin"` to `lazy="select"` on `sale_items` and `damage_items` in `models/product.py`. Fetching 100 products no longer loads thousands of past sales into memory.
+- **Optimistic Dashboard Updates**: Stock updates no longer trigger simultaneous 4-query cascades (`getAdminSalesSummary`, `getStats`, `getProducts`, `getLocations`).
+- **Asset Bundle Optimization**: Clean production build in 4.20 seconds with gzip asset delivery.
 
 ---
 

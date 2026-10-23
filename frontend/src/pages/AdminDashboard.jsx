@@ -49,7 +49,8 @@ import {
   SlidersHorizontal,
   DollarSign,
   Sparkles,
-  PackageCheck
+  PackageCheck,
+  ArrowLeftRight
 } from "lucide-react";
 
 const AdminDashboard = () => {
@@ -329,6 +330,13 @@ const AdminDashboard = () => {
             <PackagePlus className="w-4 h-4 text-emerald-600" />
             <span>Enter Stock Pieces</span>
           </button>
+          <Link
+            to="/admin/transfers"
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl shadow-sm transition"
+          >
+            <ArrowLeftRight className="w-4 h-4 text-amber-600" />
+            <span>Stock Transfers</span>
+          </Link>
           <Link
             to="/admin/live-locations"
             className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl shadow-sm transition"

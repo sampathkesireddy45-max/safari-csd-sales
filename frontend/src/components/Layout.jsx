@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Moon, Search, Sun } from "lucide-react";
 import GlobalSearch from "./GlobalSearch";
 import { useTheme } from "../context/ThemeContext";
+import OfflineStatusBanner from "./OfflineStatusBanner";
 
 const Layout = ({ children, title, subtitle, action }) => {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -13,6 +14,7 @@ const Layout = ({ children, title, subtitle, action }) => {
     <div className="flex flex-col lg:flex-row min-h-screen bg-slate-50 font-sans text-slate-800">
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
+        <OfflineStatusBanner />
         {(title || subtitle || action) && (
           <header className="bg-white dark:bg-slate-900 border-b border-slate-200/80 dark:border-slate-800 px-4 sm:px-8 py-4 sm:py-5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">

@@ -18,6 +18,7 @@ import AdminReports from "./pages/AdminReports";
 import SystemHealth from "./pages/SystemHealth";
 import AdminSales from "./pages/AdminSales";
 import EmployeeSalesDashboard from "./pages/EmployeeSalesDashboard";
+import StockTransfers from "./pages/StockTransfers";
 
 function App() {
   return (
@@ -35,10 +36,12 @@ function App() {
             <Route path="/admin/damages" element={<AdminDamages />} />
             <Route path="/admin/reports" element={<AdminReports />} />
             <Route path="/admin/sales" element={<AdminSales />} />
+            <Route path="/admin/transfers" element={<StockTransfers />} />
             <Route path="/admin/system-health" element={<SystemHealth />} />
             <Route path="/employee/dashboard" element={<EmployeeDashboard />} />
             <Route path="/employee/sales-dashboard" element={<EmployeeSalesDashboard />} />
             <Route path="/employee/sales-entry" element={<SalesEntry />} />
+            <Route path="/employee/transfers" element={<StockTransfers />} />
             <Route path="/employee/damages" element={<DamagesReport />} />
             <Route path="/employee/damages-report" element={<DamagesReport />} />
             <Route path="/" element={<Navigate to="/login" replace />} />

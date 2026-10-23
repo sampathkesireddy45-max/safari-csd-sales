@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import { getProducts, getInventories, createSale } from "../services/api";
+import { enqueueOfflineSale } from "../utils/offlineQueue";
 import { useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
 import ProductSearchSelect from "../components/ProductSearchSelect";
@@ -174,6 +175,18 @@ const SalesEntry = () => {
         quantity: getItemEffectivePieces(item),
       })),
     };
+
+    // Offline-ready intercept
+    if (!navigator.onLine) {
+      enqueueOfflineSale(saleData);
+      addToast(
+        `📡 Offline: Recorded ${totalPieces} PCS sale locally! It will auto-sync to server when connection restores.`,
+        "info"
+      );
+      setSaleItems([{ productId: "", quantity: "", unit: "pieces" }]);
+      setSubmitting(false);
+      return;
+    }
 
     try {
       await createSale(saleData);

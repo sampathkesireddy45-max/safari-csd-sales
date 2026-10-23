@@ -24,8 +24,8 @@ class Product(Base):
 
     # Relationships
     inventory_items = relationship("Inventory", back_populates="product", cascade="all, delete-orphan", lazy="selectin")
-    sale_items = relationship("SaleItem", back_populates="product", lazy="selectin")
-    damage_items = relationship("DamageReportItem", back_populates="product", lazy="selectin")
+    sale_items = relationship("SaleItem", back_populates="product", lazy="select")
+    damage_items = relationship("DamageReportItem", back_populates="product", lazy="select")
 
     @property
     def total_stock(self) -> int:

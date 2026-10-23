@@ -478,6 +478,41 @@ export const updateEmployeeOpeningStock = async (payload) => {
   });
 };
 
+// --- Inter-Store Stock Transfer API ---
+export const getStockTransfers = async (params = {}) => {
+  const searchParams = new URLSearchParams();
+  Object.keys(params).forEach((key) => {
+    if (params[key] !== undefined && params[key] !== null && params[key] !== "") {
+      searchParams.append(key, params[key]);
+    }
+  });
+  const queryString = searchParams.toString();
+  const endpoint = queryString ? `/transfers/?${queryString}` : "/transfers/";
+  return await fetchApi(endpoint);
+};
+
+export const createStockTransfer = async (transferData) => {
+  invalidateProductsCache();
+  return await fetchApi("/transfers/", {
+    method: "POST",
+    body: JSON.stringify(transferData),
+  });
+};
+
+export const receiveStockTransfer = async (transferId) => {
+  invalidateProductsCache();
+  return await fetchApi(`/transfers/${transferId}/receive`, {
+    method: "POST",
+  });
+};
+
+export const cancelStockTransfer = async (transferId) => {
+  invalidateProductsCache();
+  return await fetchApi(`/transfers/${transferId}/cancel`, {
+    method: "POST",
+  });
+};
+
 export default {
   getToken,
   setToken,
@@ -513,5 +548,9 @@ export default {
   resetInventoryToZero,
   getAdminDashboardStats,
   getEmployeeDashboardStats,
+  getStockTransfers,
+  createStockTransfer,
+  receiveStockTransfer,
+  cancelStockTransfer,
 };
 

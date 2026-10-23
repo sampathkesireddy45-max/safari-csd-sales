@@ -1,4 +1,4 @@
-from . import location, employee, product, inventory, damage_report, damage_photo, damage_photo_audit_log, sale, sale_item, inventory_transaction, damage_report_item, reconciliation
+from . import location, employee, product, inventory, damage_report, damage_photo, damage_photo_audit_log, sale, sale_item, inventory_transaction, damage_report_item, reconciliation, stock_transfer
 
 Location = location.Location
 Employee = employee.Employee
@@ -13,6 +13,7 @@ InventoryTransaction = inventory_transaction.InventoryTransaction
 DamageReportItem = damage_report_item.DamageReportItem
 ShiftReconciliation = reconciliation.ShiftReconciliation
 ReconciliationItem = reconciliation.ReconciliationItem
+StockTransfer = stock_transfer.StockTransfer
 
 __all__ = [
     "Location",
@@ -28,5 +29,6 @@ __all__ = [
     "DamageReportItem",
     "ShiftReconciliation",
     "ReconciliationItem",
+    "StockTransfer",
 ]
 
