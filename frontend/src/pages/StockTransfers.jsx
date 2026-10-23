@@ -5,6 +5,7 @@ import { useToast } from "../components/Toast";
 import {
   getStockTransfers,
   createStockTransfer,
+  sendStockTransfer,
   receiveStockTransfer,
   cancelStockTransfer,
   getLocations,
@@ -19,14 +20,15 @@ import {
   Boxes,
   Clock,
   Building2,
-  Luggage,
   Search,
   RefreshCw,
   AlertTriangle,
   ArrowRight,
+  PackageCheck,
+  Send,
+  ShieldAlert,
 } from "lucide-react";
 import ProductSearchSelect from "../components/ProductSearchSelect";
-import ScrollReveal from "../components/ScrollReveal";
 import { TableSkeleton } from "../components/LoadingSkeleton";
 
 const StockTransfers = () => {
@@ -36,20 +38,21 @@ const StockTransfers = () => {
   const [transfers, setTransfers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("ALL"); // ALL, IN_TRANSIT, RECEIVED, CANCELLED
+  const [statusFilter, setStatusFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Modal State
+  // Modal State (Admin Only)
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [locations, setLocations] = useState([]);
   const [products, setProducts] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // Form State
+  // Admin Transfer Form State
   const [fromLocationId, setFromLocationId] = useState("");
   const [toLocationId, setToLocationId] = useState("");
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [quantity, setQuantity] = useState("");
+  const [autoDispatch, setAutoDispatch] = useState(false);
   const [notes, setNotes] = useState("");
   const [sourceStock, setSourceStock] = useState(null);
 
@@ -66,9 +69,8 @@ const StockTransfers = () => {
       setLocations(locationsData || []);
       setProducts(productsData || []);
 
-      // Default source store for staff
-      if (!isAdmin && user?.assigned_location_id) {
-        setFromLocationId(String(user.assigned_location_id));
+      if (locationsData?.length > 0 && !fromLocationId) {
+        setFromLocationId(String(locationsData[0].id));
       }
     } catch (err) {
       console.error("Failed to load transfers:", err);
@@ -83,10 +85,9 @@ const StockTransfers = () => {
     loadData();
   }, [user]);
 
-  // When source store or product changes, update available source stock
+  // Compute live source stock when store or product changes
   useEffect(() => {
     if (fromLocationId && selectedProduct) {
-      // Find quantity in selectedProduct.inventory_items
       const inv = selectedProduct.inventory_items?.find(
         (i) => String(i.location_id) === String(fromLocationId)
       );
@@ -97,30 +98,37 @@ const StockTransfers = () => {
   }, [fromLocationId, selectedProduct]);
 
   const handleOpenModal = () => {
-    if (!isAdmin && user?.assigned_location_id) {
-      setFromLocationId(String(user.assigned_location_id));
-    } else if (locations.length > 0) {
+    if (!isAdmin) {
+      addToast("Unauthorized: Only administrators can configure inter-store transfers.", "error");
+      return;
+    }
+    if (locations.length > 0) {
       setFromLocationId(String(locations[0].id));
     }
     setToLocationId("");
     setSelectedProduct(null);
     setQuantity("");
+    setAutoDispatch(false);
     setNotes("");
     setIsModalOpen(true);
   };
 
   const handleCreateTransfer = async (e) => {
     e.preventDefault();
+    if (!isAdmin) {
+      addToast("Access Denied: Only Admin can order stock transfers.", "error");
+      return;
+    }
     if (!fromLocationId) {
-      addToast("Please select a source store counter.", "error");
+      addToast("Please select the sending store counter.", "error");
       return;
     }
     if (!toLocationId) {
-      addToast("Please select a destination store counter.", "error");
+      addToast("Please select the receiving destination counter.", "error");
       return;
     }
     if (fromLocationId === toLocationId) {
-      addToast("Source and destination store counters cannot be the same.", "error");
+      addToast("Sending and receiving store counters cannot be identical.", "error");
       return;
     }
     if (!selectedProduct) {
@@ -133,7 +141,7 @@ const StockTransfers = () => {
       return;
     }
     if (sourceStock !== null && qty > sourceStock) {
-      addToast(`Cannot transfer ${qty} pcs. Available at source: ${sourceStock} pcs.`, "error");
+      addToast(`Cannot order transfer of ${qty} pcs. Available at sending store: ${sourceStock} pcs.`, "error");
       return;
     }
 
@@ -144,29 +152,55 @@ const StockTransfers = () => {
         to_location_id: parseInt(toLocationId, 10),
         product_id: selectedProduct.id,
         quantity: qty,
+        auto_dispatch: autoDispatch,
         notes: notes.trim() || undefined,
       };
       const created = await createStockTransfer(payload);
-      addToast(`Dispatched ${qty} pcs of ${created.product_name} to ${created.to_location_name}!`, "success");
+      addToast(
+        `Transfer #${created.transfer_number} configured: ${qty} pcs (${created.cases_display}) from ${created.from_location_name} to ${created.to_location_name}!`,
+        "success"
+      );
       setIsModalOpen(false);
       loadData(true);
     } catch (err) {
       console.error("Failed to create transfer:", err);
-      addToast(err.message || "Failed to initiate transfer", "error");
+      addToast(err.message || "Failed to order stock transfer", "error");
     } finally {
       setSubmitting(false);
     }
   };
 
+  const handleSend = async (transfer) => {
+    const confirmSend = window.confirm(
+      `Confirm dispatch of ${transfer.quantity} Pieces (${transfer.cases_display}) from ${transfer.from_location_name} to ${transfer.to_location_name}?`
+    );
+    if (!confirmSend) return;
+
+    try {
+      await sendStockTransfer(transfer.id);
+      addToast(
+        `🚚 Dispatched ${transfer.quantity} Pieces (${transfer.cases_display})! Status is now In-Transit.`,
+        "success"
+      );
+      loadData(true);
+    } catch (err) {
+      console.error("Failed to confirm send:", err);
+      addToast(err.message || "Failed to confirm dispatch", "error");
+    }
+  };
+
   const handleReceive = async (transfer) => {
     const confirmReceive = window.confirm(
-      `Confirm receipt of ${transfer.quantity} pcs of ${transfer.product_name} at ${transfer.to_location_name}?`
+      `Confirm receipt of ${transfer.quantity} Pieces (${transfer.cases_display}) at ${transfer.to_location_name}?`
     );
     if (!confirmReceive) return;
 
     try {
       await receiveStockTransfer(transfer.id);
-      addToast(`✅ Received ${transfer.quantity} pcs at ${transfer.to_location_name}! Stock updated.`, "success");
+      addToast(
+        `✅ Received ${transfer.quantity} Pieces (${transfer.cases_display}) at ${transfer.to_location_name}! Stock added to counter.`,
+        "success"
+      );
       loadData(true);
     } catch (err) {
       console.error("Failed to receive transfer:", err);
@@ -175,14 +209,18 @@ const StockTransfers = () => {
   };
 
   const handleCancel = async (transfer) => {
+    if (!isAdmin) {
+      addToast("Only administrators can cancel transfer orders.", "error");
+      return;
+    }
     const confirmCancel = window.confirm(
-      `Cancel transfer #${transfer.transfer_number}? ${transfer.quantity} pieces will be returned to ${transfer.from_location_name}.`
+      `Cancel transfer #${transfer.transfer_number}? Pieces will remain or be returned to ${transfer.from_location_name}.`
     );
     if (!confirmCancel) return;
 
     try {
       await cancelStockTransfer(transfer.id);
-      addToast(`Transfer cancelled. ${transfer.quantity} pieces returned to source store.`, "success");
+      addToast(`Transfer order #${transfer.transfer_number} cancelled.`, "success");
       loadData(true);
     } catch (err) {
       console.error("Failed to cancel transfer:", err);
@@ -204,55 +242,102 @@ const StockTransfers = () => {
     return true;
   });
 
+  const pendingDispatchCount = transfers.filter((t) => t.status === "PENDING_DISPATCH").length;
   const inTransitCount = transfers.filter((t) => t.status === "IN_TRANSIT").length;
   const receivedCount = transfers.filter((t) => t.status === "RECEIVED").length;
   const totalPiecesMoved = transfers
     .filter((t) => t.status === "RECEIVED")
     .reduce((sum, t) => sum + (t.quantity || 0), 0);
 
+  // Helper for pieces-to-cases live preview in Admin modal
+  const pack = selectedProduct?.case_pack || 1;
+  const enteredQty = parseInt(quantity, 10) || 0;
+  const previewCases = Math.floor(enteredQty / pack);
+  const previewRemainder = enteredQty % pack;
+
   return (
     <Layout
-      title="Inter-Store Stock Transfers"
-      subtitle="Safely move and balance inventory between CSD canteen counters with dual-ended verification"
+      title={isAdmin ? "Inter-Store Stock Transfers (Admin)" : "Canteen Counter Transfer Desk"}
+      subtitle={
+        isAdmin
+          ? "Admin Executive Master: Order and adjust stock transfers between military canteen counters"
+          : "Counter Staff Portal: Confirm 'Sent' for outgoing stock and 'Received' for incoming stock"
+      }
       action={
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => loadData(true)}
             disabled={refreshing}
-            className="p-2 text-slate-500 hover:text-indigo-600 bg-white border border-slate-200 rounded-xl transition"
+            className="p-2 text-slate-500 hover:text-indigo-600 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl transition"
             title="Refresh"
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-indigo-600" : ""}`} />
           </button>
-          <button
-            type="button"
-            onClick={handleOpenModal}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm transition"
-          >
-            <Plus className="w-4 h-4" />
-            <span>New Stock Transfer</span>
-          </button>
+
+          {/* STRICTLY ADMIN ONLY: Only Admin can configure / initiate a transfer */}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={handleOpenModal}
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm transition"
+            >
+              <Plus className="w-4 h-4" />
+              <span>New Stock Transfer</span>
+            </button>
+          )}
         </div>
       }
     >
       <div className="space-y-6">
+        {/* Role Banner */}
+        {!isAdmin && (
+          <div className="bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-slate-850 dark:to-slate-800 border border-indigo-200/80 dark:border-slate-700 rounded-2xl p-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-indigo-600 text-white">
+                <Boxes className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                  Store Counter Transfer Desk ({user?.assigned_location?.name || `Counter #${user?.assigned_location_id}`})
+                </h4>
+                <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                  Admin authorizes all transfers. When items leave your counter, click <strong className="text-indigo-600">"Confirm Sent"</strong>. When items arrive at your counter, click <strong className="text-emerald-600">"Confirm Received"</strong>.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Metric Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Awaiting Send</span>
+              <div className="p-2 rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400">
+                <Send className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-3 flex items-baseline gap-2">
+              <span className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
+                {pendingDispatchCount}
+              </span>
+              <span className="text-xs text-amber-600 font-semibold">awaiting store dispatch</span>
+            </div>
+          </div>
+
           <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">In Transit On Road</span>
-              <div className="p-2 rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400">
-                <Truck className="w-5 h-5" />
+              <div className="p-2 rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400">
+                <Truck className="w-4 h-4" />
               </div>
             </div>
             <div className="mt-3 flex items-baseline gap-2">
               <span className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
                 {inTransitCount}
               </span>
-              <span className="text-xs text-amber-600 dark:text-amber-400 font-semibold">
-                awaiting counter receipt
-              </span>
+              <span className="text-xs text-blue-600 font-semibold">awaiting store receipt</span>
             </div>
           </div>
 
@@ -260,16 +345,14 @@ const StockTransfers = () => {
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Completed Deliveries</span>
               <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400">
-                <CheckCircle2 className="w-5 h-5" />
+                <CheckCircle2 className="w-4 h-4" />
               </div>
             </div>
             <div className="mt-3 flex items-baseline gap-2">
               <span className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
                 {receivedCount}
               </span>
-              <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
-                verified in stock
-              </span>
+              <span className="text-xs text-emerald-600 font-semibold">verified in stock</span>
             </div>
           </div>
 
@@ -277,14 +360,14 @@ const StockTransfers = () => {
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Total Pieces Rebalanced</span>
               <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400">
-                <Boxes className="w-5 h-5" />
+                <Boxes className="w-4 h-4" />
               </div>
             </div>
             <div className="mt-3 flex items-baseline gap-2">
               <span className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
                 {totalPiecesMoved}
               </span>
-              <span className="text-xs text-slate-500">pieces successfully transferred</span>
+              <span className="text-xs text-slate-500">pieces transferred</span>
             </div>
           </div>
         </div>
@@ -294,6 +377,7 @@ const StockTransfers = () => {
           <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
             {[
               { id: "ALL", label: `All (${transfers.length})` },
+              { id: "PENDING_DISPATCH", label: `Awaiting Send (${pendingDispatchCount})` },
               { id: "IN_TRANSIT", label: `In Transit (${inTransitCount})` },
               { id: "RECEIVED", label: `Received (${receivedCount})` },
               { id: "CANCELLED", label: `Cancelled` },
@@ -313,13 +397,13 @@ const StockTransfers = () => {
             ))}
           </div>
 
-          <div className="relative w-full sm:w-64">
+          <div className="relative w-full sm:w-72">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search transfer, product, store..."
+              placeholder="Search transfer #, product, store..."
               className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
             />
           </div>
@@ -335,16 +419,10 @@ const StockTransfers = () => {
             <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
               {statusFilter !== "ALL"
                 ? `No transfers matching status "${statusFilter}".`
-                : "Transfer surplus stock between canteen counters to balance inventory."}
+                : isAdmin
+                ? "Click 'New Stock Transfer' above to order a transfer between canteen counters."
+                : "No active transfers currently assigned for your counter."}
             </p>
-            <button
-              type="button"
-              onClick={handleOpenModal}
-              className="mt-4 inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Initiate First Transfer</span>
-            </button>
           </div>
         ) : (
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden">
@@ -353,20 +431,20 @@ const StockTransfers = () => {
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/75 dark:bg-slate-800/50 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                     <th className="py-3.5 px-4">Transfer ID</th>
-                    <th className="py-3.5 px-4">Route (From ➔ To)</th>
-                    <th className="py-3.5 px-4">Product Details</th>
-                    <th className="py-3.5 px-4 text-center">Quantity</th>
+                    <th className="py-3.5 px-4">Counter Route (From ➔ To)</th>
+                    <th className="py-3.5 px-4">Safari SKU Details</th>
+                    <th className="py-3.5 px-4 text-center">Pieces & Cases</th>
                     <th className="py-3.5 px-4">Status</th>
-                    <th className="py-3.5 px-4">Timeline / Staff</th>
-                    <th className="py-3.5 px-4 text-right">Actions</th>
+                    <th className="py-3.5 px-4">Timeline / Audit</th>
+                    <th className="py-3.5 px-4 text-right">Click Option</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
                   {filteredTransfers.map((t) => {
-                    const isDestinationStaff =
+                    const isSenderStore =
+                      isAdmin || (user?.assigned_location_id && user.assigned_location_id === t.from_location_id);
+                    const isReceiverStore =
                       isAdmin || (user?.assigned_location_id && user.assigned_location_id === t.to_location_id);
-                    const isSenderOrAdmin =
-                      isAdmin || (user?.id && user.id === t.initiated_by_id);
 
                     return (
                       <tr key={t.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-850 transition">
@@ -375,27 +453,42 @@ const StockTransfers = () => {
                         </td>
                         <td className="py-3.5 px-4">
                           <div className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200">
-                            <span>{t.from_location_name}</span>
+                            <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                              {t.from_location_name}
+                            </span>
                             <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span className="text-indigo-600 dark:text-indigo-400 font-bold">{t.to_location_name}</span>
+                            <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold">
+                              {t.to_location_name}
+                            </span>
                           </div>
-                          {t.notes && <p className="text-[11px] text-slate-400 mt-0.5 italic">"{t.notes}"</p>}
+                          {t.notes && <p className="text-[11px] text-slate-400 mt-1 italic">"{t.notes}"</p>}
                         </td>
                         <td className="py-3.5 px-4">
                           <div className="font-semibold text-slate-900 dark:text-white">{t.product_name}</div>
                           {t.product_index && (
-                            <div className="text-[11px] text-slate-400 font-mono">Index #{t.product_index}</div>
+                            <div className="text-[11px] text-slate-400 font-mono">Index #{t.product_index} (Pack: {t.case_pack} pcs)</div>
                           )}
                         </td>
                         <td className="py-3.5 px-4 text-center">
-                          <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-mono font-extrabold text-sm">
-                            {t.quantity} pcs
-                          </span>
+                          <div className="inline-flex flex-col items-center">
+                            <span className="px-2.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-mono font-extrabold text-xs">
+                              {t.quantity} Pieces
+                            </span>
+                            <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                              {t.cases_display}
+                            </span>
+                          </div>
                         </td>
                         <td className="py-3.5 px-4">
+                          {t.status === "PENDING_DISPATCH" && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800">
+                              <Clock className="w-3 h-3" />
+                              Awaiting Send
+                            </span>
+                          )}
                           {t.status === "IN_TRANSIT" && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-800">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
                               <Truck className="w-3 h-3" />
                               In Transit
                             </span>
@@ -414,53 +507,63 @@ const StockTransfers = () => {
                           )}
                         </td>
                         <td className="py-3.5 px-4 text-[11px] text-slate-500">
-                          <div>
-                            Dispatched by <span className="font-semibold text-slate-700 dark:text-slate-300">{t.initiated_by_name}</span>
-                          </div>
+                          <div>Ordered by <strong className="text-slate-700 dark:text-slate-300">{t.initiated_by_name}</strong></div>
+                          {t.sent_by_name && (
+                            <div className="text-indigo-600 dark:text-indigo-400 font-medium">
+                              Sent by {t.sent_by_name}
+                            </div>
+                          )}
                           {t.received_by_name && (
                             <div className="text-emerald-600 dark:text-emerald-400 font-medium">
                               Received by {t.received_by_name}
                             </div>
                           )}
-                          <div className="text-slate-400 mt-0.5">
-                            {new Date(t.created_at).toLocaleDateString("en-IN", {
-                              day: "2-digit",
-                              month: "short",
-                              year: "numeric",
-                            })}
-                          </div>
                         </td>
                         <td className="py-3.5 px-4 text-right">
-                          {t.status === "IN_TRANSIT" && (
-                            <div className="flex items-center justify-end gap-2">
-                              {isDestinationStaff && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleReceive(t)}
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition"
-                                >
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>Confirm Received</span>
-                                </button>
-                              )}
-                              {isSenderOrAdmin && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleCancel(t)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition"
-                                >
-                                  <XCircle className="w-3.5 h-3.5" />
-                                  <span>Cancel</span>
-                                </button>
-                              )}
-                            </div>
-                          )}
-                          {t.status === "RECEIVED" && (
-                            <span className="text-[11px] text-emerald-600 font-semibold">Stock Rebalanced</span>
-                          )}
-                          {t.status === "CANCELLED" && (
-                            <span className="text-[11px] text-slate-400 italic">Pieces Returned</span>
-                          )}
+                          <div className="flex items-center justify-end gap-2">
+                            {/* ACTION 1: SEND CLICK OPTION (For Sending Store Staff or Admin) */}
+                            {t.status === "PENDING_DISPATCH" && isSenderStore && (
+                              <button
+                                type="button"
+                                onClick={() => handleSend(t)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm transition"
+                              >
+                                <Send className="w-3.5 h-3.5" />
+                                <span>Click Sent ({t.quantity} Pcs / {t.cases_display})</span>
+                              </button>
+                            )}
+
+                            {/* ACTION 2: RECEIVE CLICK OPTION (For Receiving Store Staff or Admin) */}
+                            {t.status === "IN_TRANSIT" && isReceiverStore && (
+                              <button
+                                type="button"
+                                onClick={() => handleReceive(t)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-sm transition"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Click Received ({t.quantity} Pcs / {t.cases_display})</span>
+                              </button>
+                            )}
+
+                            {/* ACTION 3: CANCEL (Admin Master Only) */}
+                            {isAdmin && (t.status === "PENDING_DISPATCH" || t.status === "IN_TRANSIT") && (
+                              <button
+                                type="button"
+                                onClick={() => handleCancel(t)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition"
+                                title="Admin Cancel"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                                <span>Cancel</span>
+                              </button>
+                            )}
+
+                            {t.status === "RECEIVED" && (
+                              <span className="text-[11px] text-emerald-600 font-bold">
+                                Completed ✅
+                              </span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -472,8 +575,8 @@ const StockTransfers = () => {
         )}
       </div>
 
-      {/* New Transfer Modal */}
-      {isModalOpen && (
+      {/* Admin Only Stock Transfer Order Modal */}
+      {isModalOpen && isAdmin && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-5 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
@@ -482,8 +585,8 @@ const StockTransfers = () => {
                   <ArrowLeftRight className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">New Inter-Store Stock Transfer</h3>
-                  <p className="text-xs text-slate-500">Dispatch pieces between canteen counters</p>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">Admin Stock Transfer Order</h3>
+                  <p className="text-xs text-slate-500">Configure pieces and cases to be transferred between canteen counters</p>
                 </div>
               </div>
               <button
@@ -497,15 +600,15 @@ const StockTransfers = () => {
 
             <form onSubmit={handleCreateTransfer} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
-                {/* Source Canteen */}
+                {/* Sending Store */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    From Canteen (Source)
+                    From Canteen (Sending Store)
                   </label>
                   <select
                     value={fromLocationId}
                     onChange={(e) => setFromLocationId(e.target.value)}
-                    disabled={!isAdmin && user?.assigned_location_id}
+                    required
                     className="w-full text-xs p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 font-semibold"
                   >
                     {locations.map((loc) => (
@@ -516,10 +619,10 @@ const StockTransfers = () => {
                   </select>
                 </div>
 
-                {/* Destination Canteen */}
+                {/* Receiving Store */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    To Canteen (Destination)
+                    To Canteen (Receiving Store)
                   </label>
                   <select
                     value={toLocationId}
@@ -527,7 +630,7 @@ const StockTransfers = () => {
                     required
                     className="w-full text-xs p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 font-semibold"
                   >
-                    <option value="">-- Select Destination --</option>
+                    <option value="">-- Select Receiving Store --</option>
                     {locations
                       .filter((l) => String(l.id) !== String(fromLocationId))
                       .map((loc) => (
@@ -539,10 +642,10 @@ const StockTransfers = () => {
                 </div>
               </div>
 
-              {/* Product Search */}
+              {/* Product SKU Select */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Select Safari SKU / Luggage Model
+                  Safari SKU / Model Description
                 </label>
                 <ProductSearchSelect
                   products={products}
@@ -550,42 +653,73 @@ const StockTransfers = () => {
                   onSelectProduct={(p) => setSelectedProduct(p)}
                 />
                 {sourceStock !== null && (
-                  <div className="mt-1.5 flex items-center justify-between text-xs font-semibold px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800">
-                    <span className="text-slate-600 dark:text-slate-400">Available at Source Store:</span>
-                    <span className={`font-mono ${sourceStock > 0 ? "text-emerald-600 font-bold" : "text-rose-600 font-bold"}`}>
-                      {sourceStock} pieces
+                  <div className="mt-1.5 flex items-center justify-between text-xs font-semibold px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800">
+                    <span className="text-slate-600 dark:text-slate-400">Available at Sending Store:</span>
+                    <span className={`font-mono font-bold ${sourceStock > 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                      {sourceStock} Pieces
                     </span>
                   </div>
                 )}
               </div>
 
-              {/* Quantity */}
+              {/* Quantity in Pieces and Instant Cases Preview */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Quantity to Transfer (Pieces)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Quantity to Transfer (Pieces)
+                  </label>
+                  {selectedProduct && (
+                    <span className="text-[11px] text-indigo-600 font-semibold">
+                      Pack Size: {selectedProduct.case_pack || 1} pcs / Case
+                    </span>
+                  )}
+                </div>
                 <input
                   type="number"
                   min="1"
                   max={sourceStock !== null ? sourceStock : undefined}
                   value={quantity}
                   onChange={(e) => setQuantity(e.target.value)}
-                  placeholder="e.g. 4"
+                  placeholder="e.g. 12"
                   required
                   className="w-full text-xs p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 font-mono font-bold"
                 />
+
+                {enteredQty > 0 && selectedProduct && (
+                  <div className="mt-2 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/50 flex items-center justify-between text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                    <span>Equivalent Breakdown:</span>
+                    <span className="font-mono font-bold">
+                      {previewCases > 0 && `${previewCases} Case${previewCases > 1 ? "s" : ""}`}
+                      {previewRemainder > 0 && `${previewCases > 0 ? " + " : ""}${previewRemainder} Piece${previewRemainder > 1 ? "s" : ""}`}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Instant Dispatch Option */}
+              <div className="flex items-center gap-2 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
+                <input
+                  type="checkbox"
+                  id="autoDispatchCheck"
+                  checked={autoDispatch}
+                  onChange={(e) => setAutoDispatch(e.target.checked)}
+                  className="rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                <label htmlFor="autoDispatchCheck" className="text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <strong>Mark as Dispatched immediately</strong> (Skips sending store employee dispatch click)
+                </label>
               </div>
 
               {/* Notes */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Transfer Memo / Notes (Optional)
+                  Admin Transfer Memo (Optional)
                 </label>
                 <input
                   type="text"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder="e.g. Weekend counter restock, requisitioned by Upendra"
+                  placeholder="e.g. Weekend restock order by Admin"
                   className="w-full text-xs p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
@@ -604,8 +738,8 @@ const StockTransfers = () => {
                   disabled={submitting}
                   className="inline-flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition disabled:opacity-50"
                 >
-                  <Truck className="w-4 h-4" />
-                  <span>{submitting ? "Dispatching..." : "Dispatch Transfer"}</span>
+                  <ArrowLeftRight className="w-4 h-4" />
+                  <span>{submitting ? "Ordering..." : "Order Transfer"}</span>
                 </button>
               </div>
             </form>

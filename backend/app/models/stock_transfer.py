@@ -12,16 +12,19 @@ class StockTransfer(Base):
     to_location_id = Column(Integer, ForeignKey("locations.id"), nullable=False, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
     quantity = Column(Integer, nullable=False)
-    status = Column(String, default="IN_TRANSIT", nullable=False, index=True)  # IN_TRANSIT, RECEIVED, CANCELLED
+    status = Column(String, default="PENDING_DISPATCH", nullable=False, index=True)  # PENDING_DISPATCH, IN_TRANSIT, RECEIVED, CANCELLED
     initiated_by_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    sent_by_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
+    sent_at = Column(DateTime, nullable=True)
     received_by_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
+    received_at = Column(DateTime, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False, index=True)
-    received_at = Column(DateTime, nullable=True)
 
     # Relationships
     from_location = relationship("Location", foreign_keys=[from_location_id], lazy="joined")
     to_location = relationship("Location", foreign_keys=[to_location_id], lazy="joined")
     product = relationship("Product", foreign_keys=[product_id], lazy="joined")
     initiated_by = relationship("Employee", foreign_keys=[initiated_by_id], lazy="joined")
+    sent_by = relationship("Employee", foreign_keys=[sent_by_id], lazy="joined")
     received_by = relationship("Employee", foreign_keys=[received_by_id], lazy="joined")

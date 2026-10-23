@@ -499,6 +499,13 @@ export const createStockTransfer = async (transferData) => {
   });
 };
 
+export const sendStockTransfer = async (transferId) => {
+  invalidateProductsCache();
+  return await fetchApi(`/transfers/${transferId}/send`, {
+    method: "POST",
+  });
+};
+
 export const receiveStockTransfer = async (transferId) => {
   invalidateProductsCache();
   return await fetchApi(`/transfers/${transferId}/receive`, {
@@ -550,6 +557,7 @@ export default {
   getEmployeeDashboardStats,
   getStockTransfers,
   createStockTransfer,
+  sendStockTransfer,
   receiveStockTransfer,
   cancelStockTransfer,
 };
