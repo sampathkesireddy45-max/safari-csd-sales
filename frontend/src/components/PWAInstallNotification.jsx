@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Download, X, Smartphone, CheckCircle2 } from "lucide-react";
+import React, { useState, useEffect, useCallback } from "react";
+import { Download, X } from "lucide-react";
 
 const PWAInstallNotification = () => {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -7,23 +7,100 @@ const PWAInstallNotification = () => {
   const [isIOS, setIsIOS] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
 
-  useEffect(() => {
-    // Check if already in standalone/PWA installed mode
-    if (
+  // Check whether the app is currently installed on this device
+  const checkInstalledStatus = useCallback(async () => {
+    // 1. Running inside the installed PWA standalone window
+    const isStandalone =
       window.matchMedia("(display-mode: standalone)").matches ||
-      window.navigator.standalone === true
-    ) {
+      window.matchMedia("(display-mode: window-controls-overlay)").matches ||
+      window.navigator.standalone === true;
+
+    if (isStandalone) {
       setIsInstalled(true);
-      return;
+      setShowPrompt(false);
+      localStorage.setItem("safari_pwa_installed", "true");
+      return true;
     }
 
-    // Check if dismissed in this session
-    const isDismissed = sessionStorage.getItem("safari_pwa_dismissed");
+    // 2. Check navigator.getInstalledRelatedApps (Supported on Chrome/Edge Desktop & Android)
+    if ("getInstalledRelatedApps" in navigator) {
+      try {
+        const relatedApps = await navigator.getInstalledRelatedApps();
+        if (relatedApps && relatedApps.length > 0) {
+          // PWA is currently installed: stop the notification popup
+          setIsInstalled(true);
+          setShowPrompt(false);
+          localStorage.setItem("safari_pwa_installed", "true");
+          return true;
+        } else {
+          // PWA is NOT installed (or was uninstalled): permit the notification popup to appear again
+          setIsInstalled(false);
+          localStorage.removeItem("safari_pwa_installed");
+          return false;
+        }
+      } catch (err) {
+        console.warn("Notice checking getInstalledRelatedApps:", err);
+      }
+    }
 
-    // Standard Android / Chrome / Edge PWA install prompt handler
-    const handleBeforeInstallPrompt = (e) => {
+    // Fallback: If not in standalone mode, check stored flag
+    const storedInstalled = localStorage.getItem("safari_pwa_installed") === "true";
+    if (storedInstalled) {
+      // If stored as installed, mark installed unless beforeinstallprompt fires to disprove it
+      setIsInstalled(true);
+      setShowPrompt(false);
+      return true;
+    }
+
+    setIsInstalled(false);
+    return false;
+  }, []);
+
+  useEffect(() => {
+    // Initial verification
+    checkInstalledStatus();
+
+    // Re-check when window gains focus (e.g. after uninstalling in OS Settings or Chrome Apps)
+    const handleWindowFocus = () => {
+      checkInstalledStatus();
+    };
+    window.addEventListener("focus", handleWindowFocus);
+
+    // Watch for standalone display mode changes
+    const mediaQuery = window.matchMedia("(display-mode: standalone)");
+    const handleMediaChange = (e) => {
+      if (e.matches) {
+        setIsInstalled(true);
+        setShowPrompt(false);
+        localStorage.setItem("safari_pwa_installed", "true");
+      } else {
+        checkInstalledStatus();
+      }
+    };
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener("change", handleMediaChange);
+    }
+
+    // Standard Android / Chrome / Edge PWA install prompt handler:
+    // Chromium ONLY fires 'beforeinstallprompt' if the app is NOT installed (or was uninstalled).
+    const handleBeforeInstallPrompt = async (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
+
+      // Verify whether the app is actually installed
+      const alreadyInstalled = await checkInstalledStatus();
+
+      // If already installed, stop notification popup completely
+      if (alreadyInstalled) {
+        setShowPrompt(false);
+        return;
+      }
+
+      // App is NOT installed (or was uninstalled): clear any stale installed flag and show the popup
+      setIsInstalled(false);
+      localStorage.removeItem("safari_pwa_installed");
+
+      const isDismissed = sessionStorage.getItem("safari_pwa_dismissed");
       if (!isDismissed) {
         setShowPrompt(true);
       }
@@ -39,23 +116,41 @@ const PWAInstallNotification = () => {
       /safari/.test(userAgent) &&
       !/crios|fxios/.test(userAgent);
 
-    if (isIOSSafari && !isDismissed) {
-      setIsIOS(true);
-      setShowPrompt(true);
+    if (isIOSSafari) {
+      const isStandalone = window.navigator.standalone === true;
+      const isDismissed = sessionStorage.getItem("safari_pwa_dismissed");
+      if (!isStandalone) {
+        setIsIOS(true);
+        if (!isDismissed) {
+          setShowPrompt(true);
+        }
+      } else {
+        setIsInstalled(true);
+        setShowPrompt(false);
+      }
     }
 
-    // Listen for successful install
-    window.addEventListener("appinstalled", () => {
+    // Listen for successful installation: STOP popup immediately
+    const handleAppInstalled = () => {
       setIsInstalled(true);
       setShowPrompt(false);
       setDeferredPrompt(null);
-      console.log("Safari CSD PWA installed successfully");
-    });
+      localStorage.setItem("safari_pwa_installed", "true");
+      sessionStorage.removeItem("safari_pwa_dismissed");
+      console.log("Safari CSD PWA installed successfully - notification popup stopped.");
+    };
+
+    window.addEventListener("appinstalled", handleAppInstalled);
 
     return () => {
+      window.removeEventListener("focus", handleWindowFocus);
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+      if (mediaQuery.removeEventListener) {
+        mediaQuery.removeEventListener("change", handleMediaChange);
+      }
     };
-  }, []);
+  }, [checkInstalledStatus]);
 
   const handleInstallClick = async () => {
     if (!deferredPrompt) return;
@@ -65,7 +160,9 @@ const PWAInstallNotification = () => {
     console.log(`PWA install prompt outcome: ${outcome}`);
 
     if (outcome === "accepted") {
+      setIsInstalled(true);
       setShowPrompt(false);
+      localStorage.setItem("safari_pwa_installed", "true");
     }
     setDeferredPrompt(null);
   };
@@ -75,6 +172,7 @@ const PWAInstallNotification = () => {
     sessionStorage.setItem("safari_pwa_dismissed", "true");
   };
 
+  // If the app is installed or prompt shouldn't show, render nothing
   if (isInstalled || !showPrompt) return null;
 
   return (

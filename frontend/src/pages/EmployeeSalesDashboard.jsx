@@ -1,10 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
-import {
-  getEmployeeSalesDashboard,
-  updateEmployeeOpeningStock,
-} from "../services/api";
+import { getEmployeeSalesDashboard } from "../services/api";
 import { useToast } from "../components/Toast";
 import { TableSkeleton, CardSkeleton } from "../components/LoadingSkeleton";
 import {
@@ -29,8 +26,6 @@ import {
   Tag,
   Globe2,
   Store,
-  Edit2,
-  Edit3,
   ArrowDownToLine,
 } from "lucide-react";
 
@@ -75,53 +70,6 @@ const EmployeeSalesDashboard = () => {
   const [stockStatusFilter, setStockStatusFilter] = useState("ALL"); // ALL | SOLD | LOW | OUT | OVERFLOW | HEALTHY
   const [activeTab, setActiveTab] = useState("stock"); // "stock" | "sales"
   const [viewUnit, setViewUnit] = useState("pieces"); // "pieces" | "cases"
-
-  // Opening stock editing state (For Store Staff & Admin)
-  const [editingOpeningStock, setEditingOpeningStock] = useState(null);
-  const [newOpeningStockVal, setNewOpeningStockVal] = useState("");
-  const [savingOpeningStock, setSavingOpeningStock] = useState(false);
-
-  const handleOpenOpeningStockModal = (item) => {
-    setEditingOpeningStock(item);
-    const currOpening = item.store_opening_stock ?? item.opening_stock ?? 0;
-    setNewOpeningStockVal(String(currOpening));
-  };
-
-  const handleCloseOpeningStockModal = () => {
-    setEditingOpeningStock(null);
-    setNewOpeningStockVal("");
-  };
-
-  const handleSaveOpeningStock = async (e) => {
-    e.preventDefault();
-    if (!editingOpeningStock) return;
-    const val = parseInt(newOpeningStockVal, 10);
-    if (isNaN(val) || val < 0) {
-      addToast("Please enter a valid non-negative opening stock (0 or more pieces).", "error");
-      return;
-    }
-
-    setSavingOpeningStock(true);
-    try {
-      const res = await updateEmployeeOpeningStock({
-        product_id: editingOpeningStock.product_id,
-        location_id: data?.selected_location?.id || user?.assigned_location_id,
-        opening_stock: val,
-      });
-
-      addToast(
-        res.message || `Opening stock for [${editingOpeningStock.name}] updated to ${val} PCS!`,
-        "success"
-      );
-      handleCloseOpeningStockModal();
-      await loadDashboardData();
-    } catch (err) {
-      console.error("Failed to update opening stock:", err);
-      addToast(err.message || "Failed to update opening stock", "error");
-    } finally {
-      setSavingOpeningStock(false);
-    }
-  };
 
   const loadDashboardData = async (extraParams = {}) => {
     setLoading(true);
@@ -614,21 +562,13 @@ const EmployeeSalesDashboard = () => {
                               )}
                             </td>
 
-                            {/* Store Opening Stock (Click to enter/adjust opening stock) */}
+                            {/* Store Opening Stock (View-only for counter staff; managed by Admin) */}
                             <td className="px-3 py-3 text-center bg-blue-50/30 border-l border-blue-50 font-bold text-slate-800 text-xs">
-                              <button
-                                type="button"
-                                onClick={() => handleOpenOpeningStockModal(item)}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-blue-100/80 text-blue-900 border border-transparent hover:border-blue-300 transition group cursor-pointer shadow-2xs"
-                                title="Click to enter / adjust opening stock for this counter"
-                              >
-                                <span>
-                                  {viewUnit === "pieces"
-                                    ? `${storeOpening} PCS`
-                                    : `${(storeOpening / item.case_pack).toFixed(2)} Cs`}
-                                </span>
-                                <Edit2 className="w-3 h-3 text-blue-500 opacity-60 group-hover:opacity-100 shrink-0" />
-                              </button>
+                              <span>
+                                {viewUnit === "pieces"
+                                  ? `${storeOpening} PCS`
+                                  : `${(storeOpening / item.case_pack).toFixed(2)} Cs`}
+                              </span>
                             </td>
 
                             {/* Store Receiving Stock (Inward arrivals / transfers) */}
@@ -794,107 +734,6 @@ const EmployeeSalesDashboard = () => {
           </div>
         )}
       </div>
-
-      {/* Modal: Enter/Adjust Store Opening Stock */}
-      {editingOpeningStock && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2.5 rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
-                  <Boxes className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                    Enter Opening Stock
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Store: <strong className="text-slate-800 dark:text-slate-200">{data?.selected_location?.name || user?.assigned_location?.name || "Assigned Store"}</strong>
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleCloseOpeningStockModal}
-                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Product Details */}
-            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-3.5 space-y-1.5 border border-slate-200/80 dark:border-slate-700/60 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">CSD Index:</span>
-                <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                  #{editingOpeningStock.index_no}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">Model Name:</span>
-                <span className="font-semibold text-slate-900 dark:text-white truncate max-w-[200px]" title={editingOpeningStock.name}>
-                  {editingOpeningStock.name}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">Case Pack Size:</span>
-                <span className="font-bold text-slate-700 dark:text-slate-300">
-                  {editingOpeningStock.case_pack || 1} Pcs / Case
-                </span>
-              </div>
-            </div>
-
-            <form onSubmit={handleSaveOpeningStock} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Starting / Opening Stock (Pieces)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  value={newOpeningStockVal}
-                  onChange={(e) => setNewOpeningStockVal(e.target.value)}
-                  required
-                  autoFocus
-                  placeholder="e.g. 10"
-                  className="w-full text-base p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 font-mono font-bold"
-                />
-
-                {/* Live Breakdown into Cases */}
-                {parseInt(newOpeningStockVal, 10) >= 0 && (
-                  <div className="mt-2 p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/50 flex items-center justify-between text-xs font-semibold text-blue-900 dark:text-blue-300">
-                    <span>Equivalent Cases:</span>
-                    <span className="font-mono font-bold">
-                      {Math.floor(parseInt(newOpeningStockVal, 10) / (editingOpeningStock.case_pack || 1))} Cases
-                      {parseInt(newOpeningStockVal, 10) % (editingOpeningStock.case_pack || 1) > 0 &&
-                        `, ${parseInt(newOpeningStockVal, 10) % (editingOpeningStock.case_pack || 1)} Pieces`}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={handleCloseOpeningStockModal}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingOpeningStock}
-                  className="inline-flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md transition disabled:opacity-50"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>{savingOpeningStock ? "Saving..." : "Save Opening Stock"}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </Layout>
   );
 };

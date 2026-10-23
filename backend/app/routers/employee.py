@@ -613,15 +613,13 @@ def update_employee_opening_stock(
     current_user: Employee = Depends(get_current_active_user)
 ):
     """
-    Allows store counter staff and Admin to enter/adjust opening stock.
-    - Staff are assigned to their counter and enter opening stock for their store.
-    - Admin can enter opening stock for any store.
-    - Atomic audit logging with InventoryTransaction.
+    Opening stock baseline modification is restricted to Administrators only.
+    Store employees have view-only access to prevent unauthorized baseline alterations.
     """
-    if current_user.role != "admin" and not current_user.assigned_location_id:
+    if current_user.role != "admin":
         raise HTTPException(
-            status_code=400,
-            detail="Cannot update opening stock: You have no assigned retail store location."
+            status_code=403,
+            detail="Access forbidden: Store counter employees cannot edit Opening Stock. Only Administrators can adjust monthly Opening Stock baselines."
         )
 
     target_id = current_user.id
