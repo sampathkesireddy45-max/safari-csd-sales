@@ -1,7 +1,25 @@
 # Safari CSD Sales & Stock Telemetry - Session Checkpoint
 
-**Last Saved Timestamp:** October 23, 2026 - 22:30 IST  
+**Last Saved Timestamp:** October 23, 2026 - 22:55 IST  
 **Workspace Path:** `C:\Users\sampa\overall sales`  
+
+---
+
+## 🔒 Permission & PWA Installation Lifecycle Updates (October 23, 2026)
+
+### 1. Opening Stock Admin-Only Restriction
+- **Employee Portal**: Opening Stock editing controls (button, pencil icon, edit modal) have been completely removed from [`EmployeeSalesDashboard.jsx`](file:///C:/Users/sampa/overall%20sales/frontend/src/pages/EmployeeSalesDashboard.jsx). Store counter staff have strictly view-only visibility.
+- **Backend Authorization**: [`POST /employee/sales-dashboard/opening-stock`](file:///C:/Users/sampa/overall%20sales/backend/app/routers/employee.py) enforces `HTTP 403 Forbidden` if called by non-admin accounts. Only Administrators can adjust opening stock baselines.
+
+### 2. PWA Notification Smart Install/Uninstall Lifecycle
+- **Installed Detection**:
+  - Leverages `navigator.getInstalledRelatedApps()` paired with `"related_applications"` in [`manifest.json`](file:///C:/Users/sampa/overall%20sales/frontend/public/manifest.json).
+  - Standalone mode check (`display-mode: standalone` / `window.navigator.standalone`).
+  - Listens to `appinstalled` event: immediately stops the notification pop-up once installed.
+- **Uninstalled Re-Activation**:
+  - When uninstalled, `navigator.getInstalledRelatedApps()` returns `[]` and Chromium fires `beforeinstallprompt`.
+  - The notification pop-up automatically reappears when the user visits the web app again.
+  - Periodic / on-focus checks re-evaluate installation state when switching back from OS or browser app manager.
 
 ---
 
