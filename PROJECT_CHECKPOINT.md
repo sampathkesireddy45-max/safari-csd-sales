@@ -1,7 +1,19 @@
 # Safari CSD Sales & Stock Telemetry - Session Checkpoint
 
-**Last Saved Timestamp:** October 23, 2026 - 19:45 IST  
+**Last Saved Timestamp:** October 23, 2026 - 22:30 IST  
 **Workspace Path:** `C:\Users\sampa\overall sales`  
+
+---
+
+## 📦 Inward Receiving Stock Telemetry & Visibility Parity (October 23, 2026)
+
+### 1. Updated Formula Implementation
+$$\text{Closing Stock} = \text{Opening Stock} + \text{Receiving Stock} - \text{Dispatched Out} - \text{Total Pieces Sold}$$
+- **Inward Arrivals**: Any stock received during the month (via inward delivery or incoming inter-store transfer) is credited to **Receiving Stock**, directly augmenting Closing Stock.
+- **Admin Manual Edit & Audit**: Admin has full permission to adjust Receiving Stock for any individual store counter (`POST /admin/dashboard/receiving-stock`) with an immutable audit log (`AdminStockAuditLog(stock_type="STORE_RECEIVING")`), which automatically updates Closing Stock and live `Inventory.quantity`.
+- **Visibility Parity**:
+  - **Admin Portal**: Top metric card (`Store Receiving Stock` / `Overall Receiving Stock`), dedicated index-wise table columns (`Store Receiving` and `Overall Receiving`), unit toggles (Pieces / Cases), and modal edit access (`Edit Receiving`).
+  - **Employee Portal**: Top KPI card (`Store Receiving Stock`), dedicated catalog column (`Receiving Stock`), unit toggles (Pieces / Cases).
 
 ---
 
