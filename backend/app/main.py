@@ -92,6 +92,10 @@ def on_startup():
                 admin_user.set_password(bootstrap_password or "canteen@123")
                 db.add(admin_user)
                 db.commit()
+
+            # Automatically seed 8 canteen stores, employees, and 100 SKUs on Render/cloud
+            from .utils.seed_data import seed_database_if_empty
+            seed_database_if_empty(db)
         finally:
             db.close()
     except RuntimeError:
