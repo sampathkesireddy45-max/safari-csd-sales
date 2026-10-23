@@ -269,9 +269,8 @@ const EmployeeSalesDashboard = () => {
               <div className="text-2xl font-black text-blue-950">
                 {(summary.store_opening_stock ?? summary.total_opening_stock ?? 0).toLocaleString()} <span className="text-xs font-bold text-blue-500">PCS</span>
               </div>
-              <div className="text-[11px] font-medium text-blue-700/80 mt-1 flex items-center justify-between">
+              <div className="text-[11px] font-medium text-blue-700/80 mt-1">
                 <span>Assigned store starting stock</span>
-                <span className="font-mono text-[10px] bg-blue-100/70 px-1.5 py-0.2 rounded">Closing + Sold</span>
               </div>
             </div>
 
@@ -286,9 +285,8 @@ const EmployeeSalesDashboard = () => {
               <div className="text-2xl font-black text-indigo-950">
                 {(summary.store_closing_stock ?? summary.total_closing_stock ?? 0).toLocaleString()} <span className="text-xs font-bold text-indigo-500">PCS</span>
               </div>
-              <div className="text-[11px] font-medium text-indigo-700/80 mt-1 flex items-center justify-between">
+              <div className="text-[11px] font-medium text-indigo-700/80 mt-1">
                 <span>Current live counter balance</span>
-                <span className="font-mono text-[10px] bg-indigo-100/70 px-1.5 py-0.2 rounded">Live Warehouse</span>
               </div>
             </div>
 
