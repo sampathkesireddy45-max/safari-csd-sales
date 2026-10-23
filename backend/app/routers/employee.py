@@ -255,7 +255,7 @@ def get_employee_sales_dashboard(
     in_transit_rows = db.query(
         StockTransfer.product_id,
         func.coalesce(func.sum(StockTransfer.quantity), 0)
-    ).filter(StockTransfer.status == "IN_TRANSIT").group_by(StockTransfer.product_id).all()
+    ).filter(StockTransfer.status == "SENT").group_by(StockTransfer.product_id).all()
     overall_in_transit_map = {row[0]: int(row[1] or 0) for row in in_transit_rows}
 
     # Store specific transfers out and in
@@ -267,7 +267,7 @@ def get_employee_sales_dashboard(
             func.coalesce(func.sum(StockTransfer.quantity), 0)
         ).filter(
             StockTransfer.from_location_id == selected_loc_id,
-            StockTransfer.status.in_(["IN_TRANSIT", "RECEIVED"])
+            StockTransfer.status.in_(["SENT", "RECEIVED"])
         ).group_by(StockTransfer.product_id).all()
         store_transfer_out_map = {row[0]: int(row[1] or 0) for row in out_rows}
 
@@ -559,7 +559,7 @@ def update_employee_opening_stock(
     t_out = db.query(func.coalesce(func.sum(StockTransfer.quantity), 0)).filter(
         StockTransfer.product_id == req.product_id,
         StockTransfer.from_location_id == target_location_id,
-        StockTransfer.status.in_(["IN_TRANSIT", "RECEIVED"])
+        StockTransfer.status.in_(["SENT", "RECEIVED"])
     ).scalar() or 0
 
     t_in = db.query(func.coalesce(func.sum(StockTransfer.quantity), 0)).filter(

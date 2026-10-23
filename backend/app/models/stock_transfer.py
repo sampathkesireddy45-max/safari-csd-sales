@@ -12,7 +12,7 @@ class StockTransfer(Base):
     to_location_id = Column(Integer, ForeignKey("locations.id"), nullable=False, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
     quantity = Column(Integer, nullable=False)
-    status = Column(String, default="PENDING_DISPATCH", nullable=False, index=True)  # PENDING_DISPATCH, IN_TRANSIT, RECEIVED, CANCELLED
+    status = Column(String, default="SENT", nullable=False, index=True)  # SENT, RECEIVED, CANCELLED
     initiated_by_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
     sent_by_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
     sent_at = Column(DateTime, nullable=True)

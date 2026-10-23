@@ -43,7 +43,7 @@ def _format_transfer(t: models.StockTransfer) -> dict:
         "cases": cases,
         "remainder_pieces": remainder,
         "cases_display": cases_display,
-        "status": t.status,
+        "status": t.status,  # "SENT", "RECEIVED", "CANCELLED"
         "initiated_by_id": t.initiated_by_id,
         "initiated_by_name": t.initiated_by.name if t.initiated_by else f"Admin #{t.initiated_by_id}",
         "sent_by_id": t.sent_by_id,
@@ -64,25 +64,26 @@ def create_stock_transfer(
 ):
     """
     STRICTLY ADMIN ONLY:
-    Only the Administrator has permission to configure and order stock transfers between store locations.
+    Only Administrator orders stock transfers between store locations.
+    When created, pieces are automatically marked as SENT and deducted from sending store.
     """
     if payload.quantity <= 0:
         raise HTTPException(status_code=400, detail="Transfer quantity must be at least 1 piece.")
     if payload.from_location_id == payload.to_location_id:
-        raise HTTPException(status_code=400, detail="Source and destination store counters cannot be the same.")
+        raise HTTPException(status_code=400, detail="Sending and receiving store counters cannot be the same.")
 
     from_loc = db.query(models.Location).filter(models.Location.id == payload.from_location_id).first()
     if not from_loc:
-        raise HTTPException(status_code=404, detail="Source store location not found.")
+        raise HTTPException(status_code=404, detail="Sending store location not found.")
     to_loc = db.query(models.Location).filter(models.Location.id == payload.to_location_id).first()
     if not to_loc:
-        raise HTTPException(status_code=404, detail="Destination store location not found.")
+        raise HTTPException(status_code=404, detail="Receiving store location not found.")
 
     prod = db.query(models.Product).filter(models.Product.id == payload.product_id).first()
     if not prod:
         raise HTTPException(status_code=404, detail="Product not found.")
 
-    # Check available stock at source store
+    # Check available stock at sending store
     source_inv = db.query(models.Inventory).filter(
         models.Inventory.product_id == payload.product_id,
         models.Inventory.location_id == payload.from_location_id
@@ -95,16 +96,11 @@ def create_stock_transfer(
             detail=f"Insufficient stock at {from_loc.name}. Available: {available_stock} pcs, Requested to transfer: {payload.quantity} pcs."
         )
 
+    # Immediately deduct pieces from sending store (Marked as SENT)
+    source_inv.quantity -= payload.quantity
+
     transfer_no = _generate_transfer_no()
     now_utc = datetime.datetime.utcnow()
-
-    # If auto_dispatch is chosen by Admin, deduct stock immediately
-    initial_status = "IN_TRANSIT" if payload.auto_dispatch else "PENDING_DISPATCH"
-    sent_time = now_utc if payload.auto_dispatch else None
-    sent_by = current_admin.id if payload.auto_dispatch else None
-
-    if payload.auto_dispatch:
-        source_inv.quantity -= payload.quantity
 
     transfer = models.StockTransfer(
         transfer_number=transfer_no,
@@ -112,27 +108,26 @@ def create_stock_transfer(
         to_location_id=payload.to_location_id,
         product_id=payload.product_id,
         quantity=payload.quantity,
-        status=initial_status,
+        status="SENT",
         initiated_by_id=current_admin.id,
-        sent_by_id=sent_by,
-        sent_at=sent_time,
+        sent_by_id=current_admin.id,
+        sent_at=now_utc,
         notes=payload.notes,
         created_at=now_utc,
     )
     db.add(transfer)
     db.flush()
 
-    if payload.auto_dispatch:
-        txn = models.InventoryTransaction(
-            inventory_id=source_inv.id,
-            quantity_change=-payload.quantity,
-            transaction_type="transfer_out",
-            reference_id=transfer.id,
-            reference_type="stock_transfer",
-            performed_by=current_admin.id,
-            notes=f"Admin dispatched {payload.quantity} pcs to {to_loc.name} (Transfer #{transfer_no})"
-        )
-        db.add(txn)
+    txn = models.InventoryTransaction(
+        inventory_id=source_inv.id,
+        quantity_change=-payload.quantity,
+        transaction_type="transfer_sent",
+        reference_id=transfer.id,
+        reference_type="stock_transfer",
+        performed_by=current_admin.id,
+        notes=f"Sent {payload.quantity} pcs to {to_loc.name} (Transfer #{transfer_no})"
+    )
+    db.add(txn)
 
     db.commit()
     db.refresh(transfer)
@@ -151,7 +146,7 @@ def list_stock_transfers(
         query = query.filter(models.StockTransfer.status == status.strip().upper())
 
     if current_user.role != "admin":
-        # Employees ONLY see transfers where their assigned counter is the sender or recipient
+        # Staff only see transfers where their assigned counter is sender or receiver
         store_id = current_user.assigned_location_id
         if not store_id:
             return []
@@ -168,64 +163,6 @@ def list_stock_transfers(
     transfers = query.order_by(models.StockTransfer.created_at.desc()).limit(limit).all()
     return [_format_transfer(t) for t in transfers]
 
-@router.post("/{transfer_id}/send", response_model=schemas.StockTransferResponse)
-def confirm_sent_stock_transfer(
-    transfer_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.Employee = Depends(get_current_active_user)
-):
-    """
-    Respective sending store employee (or Admin) clicks 'Confirm Sent'.
-    Deducts stock from sending store and marks status as IN_TRANSIT.
-    """
-    transfer = db.query(models.StockTransfer).filter(models.StockTransfer.id == transfer_id).first()
-    if not transfer:
-        raise HTTPException(status_code=404, detail="Stock transfer order not found.")
-
-    if transfer.status != "PENDING_DISPATCH":
-        raise HTTPException(status_code=400, detail=f"Cannot send transfer with status {transfer.status}.")
-
-    # Authorization: Employee assigned to source store OR Admin
-    if current_user.role != "admin" and current_user.assigned_location_id != transfer.from_location_id:
-        raise HTTPException(status_code=403, detail="Only staff assigned to the sending store or an Admin can confirm dispatch.")
-
-    # Check stock
-    source_inv = db.query(models.Inventory).filter(
-        models.Inventory.product_id == transfer.product_id,
-        models.Inventory.location_id == transfer.from_location_id
-    ).first()
-
-    available = source_inv.quantity if source_inv else 0
-    if available < transfer.quantity:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot dispatch: Available stock at counter is {available} pcs, required {transfer.quantity} pcs."
-        )
-
-    source_inv.quantity -= transfer.quantity
-
-    now_utc = datetime.datetime.utcnow()
-    transfer.status = "IN_TRANSIT"
-    transfer.sent_by_id = current_user.id
-    transfer.sent_at = now_utc
-
-    db.flush()
-
-    txn = models.InventoryTransaction(
-        inventory_id=source_inv.id,
-        quantity_change=-transfer.quantity,
-        transaction_type="transfer_out",
-        reference_id=transfer.id,
-        reference_type="stock_transfer",
-        performed_by=current_user.id,
-        notes=f"Store counter dispatched {transfer.quantity} pcs to {transfer.to_location.name} (Transfer #{transfer.transfer_number})"
-    )
-    db.add(txn)
-
-    db.commit()
-    db.refresh(transfer)
-    return _format_transfer(transfer)
-
 @router.post("/{transfer_id}/receive", response_model=schemas.StockTransferResponse)
 def confirm_received_stock_transfer(
     transfer_id: int,
@@ -234,18 +171,18 @@ def confirm_received_stock_transfer(
 ):
     """
     Respective receiving store employee (or Admin) clicks 'Confirm Received'.
-    Adds stock to destination store and marks status as RECEIVED.
+    Adds stock to destination store counter and marks status as RECEIVED.
     """
     transfer = db.query(models.StockTransfer).filter(models.StockTransfer.id == transfer_id).first()
     if not transfer:
         raise HTTPException(status_code=404, detail="Stock transfer record not found.")
 
-    if transfer.status != "IN_TRANSIT":
-        raise HTTPException(status_code=400, detail=f"Cannot receive transfer with status {transfer.status}. Transfer must be In-Transit.")
+    if transfer.status != "SENT":
+        raise HTTPException(status_code=400, detail=f"Cannot receive transfer with status {transfer.status}. Transfer must be Sent.")
 
     # Authorization: Destination store employee OR Admin
     if current_user.role != "admin" and current_user.assigned_location_id != transfer.to_location_id:
-        raise HTTPException(status_code=403, detail="Only staff assigned to the destination store or an Admin can confirm receipt.")
+        raise HTTPException(status_code=403, detail="Only staff assigned to the receiving store or an Admin can confirm receipt.")
 
     dest_inv = db.query(models.Inventory).filter(
         models.Inventory.product_id == transfer.product_id,
@@ -272,11 +209,11 @@ def confirm_received_stock_transfer(
     txn = models.InventoryTransaction(
         inventory_id=dest_inv.id,
         quantity_change=transfer.quantity,
-        transaction_type="transfer_in",
+        transaction_type="transfer_received",
         reference_id=transfer.id,
         reference_type="stock_transfer",
         performed_by=current_user.id,
-        notes=f"Store counter received {transfer.quantity} pcs from {transfer.from_location.name} (Transfer #{transfer.transfer_number})"
+        notes=f"Counter received {transfer.quantity} pcs from {transfer.from_location.name} (Transfer #{transfer.transfer_number})"
     )
     db.add(txn)
 
@@ -293,7 +230,7 @@ def cancel_stock_transfer(
     """
     STRICTLY ADMIN ONLY:
     Only an Admin can cancel an active stock transfer.
-    If the transfer was already IN_TRANSIT, pieces are returned to source counter.
+    Pieces are returned to sending counter.
     """
     transfer = db.query(models.StockTransfer).filter(models.StockTransfer.id == transfer_id).first()
     if not transfer:
@@ -302,35 +239,33 @@ def cancel_stock_transfer(
     if transfer.status in ["RECEIVED", "CANCELLED"]:
         raise HTTPException(status_code=400, detail=f"Cannot cancel transfer that is already {transfer.status}.")
 
-    # If it was already dispatched, restore pieces to source store
-    if transfer.status == "IN_TRANSIT":
-        source_inv = db.query(models.Inventory).filter(
-            models.Inventory.product_id == transfer.product_id,
-            models.Inventory.location_id == transfer.from_location_id
-        ).first()
+    source_inv = db.query(models.Inventory).filter(
+        models.Inventory.product_id == transfer.product_id,
+        models.Inventory.location_id == transfer.from_location_id
+    ).first()
 
-        if not source_inv:
-            source_inv = models.Inventory(
-                product_id=transfer.product_id,
-                location_id=transfer.from_location_id,
-                quantity=transfer.quantity
-            )
-            db.add(source_inv)
-        else:
-            source_inv.quantity += transfer.quantity
-
-        db.flush()
-
-        txn = models.InventoryTransaction(
-            inventory_id=source_inv.id,
-            quantity_change=transfer.quantity,
-            transaction_type="transfer_cancel",
-            reference_id=transfer.id,
-            reference_type="stock_transfer",
-            performed_by=current_admin.id,
-            notes=f"Admin cancelled Transfer #{transfer.transfer_number}. {transfer.quantity} pcs returned to {transfer.from_location.name}."
+    if not source_inv:
+        source_inv = models.Inventory(
+            product_id=transfer.product_id,
+            location_id=transfer.from_location_id,
+            quantity=transfer.quantity
         )
-        db.add(txn)
+        db.add(source_inv)
+    else:
+        source_inv.quantity += transfer.quantity
+
+    db.flush()
+
+    txn = models.InventoryTransaction(
+        inventory_id=source_inv.id,
+        quantity_change=transfer.quantity,
+        transaction_type="transfer_cancel",
+        reference_id=transfer.id,
+        reference_type="stock_transfer",
+        performed_by=current_admin.id,
+        notes=f"Admin cancelled Transfer #{transfer.transfer_number}. {transfer.quantity} pcs returned to {transfer.from_location.name}."
+    )
+    db.add(txn)
 
     transfer.status = "CANCELLED"
     db.commit()

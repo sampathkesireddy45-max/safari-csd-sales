@@ -139,7 +139,7 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
     in_transit_rows = db.query(
         models.StockTransfer.product_id,
         func.coalesce(func.sum(models.StockTransfer.quantity), 0)
-    ).filter(models.StockTransfer.status == "IN_TRANSIT").group_by(models.StockTransfer.product_id).all()
+    ).filter(models.StockTransfer.status == "SENT").group_by(models.StockTransfer.product_id).all()
     overall_in_transit_map = {row[0]: int(row[1] or 0) for row in in_transit_rows}
 
     # Store specific transfers out and in
@@ -163,7 +163,7 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
                 func.coalesce(func.sum(models.StockTransfer.quantity), 0)
             ).filter(
                 models.StockTransfer.from_location_id == target_store_id,
-                models.StockTransfer.status.in_(["IN_TRANSIT", "RECEIVED"])
+                models.StockTransfer.status.in_(["SENT", "RECEIVED"])
             ).group_by(models.StockTransfer.product_id).all()
             store_transfer_out_map = {row[0]: int(row[1] or 0) for row in out_rows}
 
@@ -423,7 +423,7 @@ def update_admin_opening_stock(
     t_out = db.query(func.coalesce(func.sum(models.StockTransfer.quantity), 0)).filter(
         models.StockTransfer.product_id == req.product_id,
         models.StockTransfer.from_location_id == req.location_id,
-        models.StockTransfer.status.in_(["IN_TRANSIT", "RECEIVED"])
+        models.StockTransfer.status.in_(["SENT", "RECEIVED"])
     ).scalar() or 0
 
     t_in = db.query(func.coalesce(func.sum(models.StockTransfer.quantity), 0)).filter(
@@ -733,7 +733,7 @@ def get_admin_dashboard_stats(db: Session = Depends(get_db)):
     ).scalar()
     total_stock = total_stock_result if total_stock_result is not None else 0
     total_in_transit = db.query(func.coalesce(func.sum(models.StockTransfer.quantity), 0)).filter(
-        models.StockTransfer.status == "IN_TRANSIT"
+        models.StockTransfer.status == "SENT"
     ).scalar() or 0
     total_stock = total_stock + total_in_transit
 

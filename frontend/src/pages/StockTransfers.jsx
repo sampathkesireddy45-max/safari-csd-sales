@@ -5,7 +5,6 @@ import { useToast } from "../components/Toast";
 import {
   getStockTransfers,
   createStockTransfer,
-  sendStockTransfer,
   receiveStockTransfer,
   cancelStockTransfer,
   getLocations,
@@ -13,20 +12,15 @@ import {
 } from "../services/api";
 import {
   ArrowLeftRight,
-  Truck,
   CheckCircle2,
   XCircle,
   Plus,
   Boxes,
   Clock,
-  Building2,
   Search,
   RefreshCw,
-  AlertTriangle,
   ArrowRight,
-  PackageCheck,
   Send,
-  ShieldAlert,
 } from "lucide-react";
 import ProductSearchSelect from "../components/ProductSearchSelect";
 import { TableSkeleton } from "../components/LoadingSkeleton";
@@ -38,10 +32,10 @@ const StockTransfers = () => {
   const [transfers, setTransfers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("ALL"); // ALL | SENT | RECEIVED | CANCELLED
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Modal State (Admin Only)
+  // Admin Transfer Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [locations, setLocations] = useState([]);
   const [products, setProducts] = useState([]);
@@ -52,7 +46,6 @@ const StockTransfers = () => {
   const [toLocationId, setToLocationId] = useState("");
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [quantity, setQuantity] = useState("");
-  const [autoDispatch, setAutoDispatch] = useState(false);
   const [notes, setNotes] = useState("");
   const [sourceStock, setSourceStock] = useState(null);
 
@@ -108,7 +101,6 @@ const StockTransfers = () => {
     setToLocationId("");
     setSelectedProduct(null);
     setQuantity("");
-    setAutoDispatch(false);
     setNotes("");
     setIsModalOpen(true);
   };
@@ -128,7 +120,7 @@ const StockTransfers = () => {
       return;
     }
     if (fromLocationId === toLocationId) {
-      addToast("Sending and receiving store counters cannot be identical.", "error");
+      addToast("Sending and receiving store counters cannot be the same.", "error");
       return;
     }
     if (!selectedProduct) {
@@ -141,7 +133,7 @@ const StockTransfers = () => {
       return;
     }
     if (sourceStock !== null && qty > sourceStock) {
-      addToast(`Cannot order transfer of ${qty} pcs. Available at sending store: ${sourceStock} pcs.`, "error");
+      addToast(`Cannot transfer ${qty} pcs. Available at sending store: ${sourceStock} pcs.`, "error");
       return;
     }
 
@@ -152,12 +144,11 @@ const StockTransfers = () => {
         to_location_id: parseInt(toLocationId, 10),
         product_id: selectedProduct.id,
         quantity: qty,
-        auto_dispatch: autoDispatch,
         notes: notes.trim() || undefined,
       };
       const created = await createStockTransfer(payload);
       addToast(
-        `Transfer #${created.transfer_number} configured: ${qty} pcs (${created.cases_display}) from ${created.from_location_name} to ${created.to_location_name}!`,
+        `Sent ${qty} pcs (${created.cases_display}) from ${created.from_location_name} to ${created.to_location_name}!`,
         "success"
       );
       setIsModalOpen(false);
@@ -167,25 +158,6 @@ const StockTransfers = () => {
       addToast(err.message || "Failed to order stock transfer", "error");
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleSend = async (transfer) => {
-    const confirmSend = window.confirm(
-      `Confirm dispatch of ${transfer.quantity} Pieces (${transfer.cases_display}) from ${transfer.from_location_name} to ${transfer.to_location_name}?`
-    );
-    if (!confirmSend) return;
-
-    try {
-      await sendStockTransfer(transfer.id);
-      addToast(
-        `🚚 Dispatched ${transfer.quantity} Pieces (${transfer.cases_display})! Status is now In-Transit.`,
-        "success"
-      );
-      loadData(true);
-    } catch (err) {
-      console.error("Failed to confirm send:", err);
-      addToast(err.message || "Failed to confirm dispatch", "error");
     }
   };
 
@@ -214,7 +186,7 @@ const StockTransfers = () => {
       return;
     }
     const confirmCancel = window.confirm(
-      `Cancel transfer #${transfer.transfer_number}? Pieces will remain or be returned to ${transfer.from_location_name}.`
+      `Cancel transfer #${transfer.transfer_number}? Pieces will be returned to ${transfer.from_location_name}.`
     );
     if (!confirmCancel) return;
 
@@ -242,8 +214,7 @@ const StockTransfers = () => {
     return true;
   });
 
-  const pendingDispatchCount = transfers.filter((t) => t.status === "PENDING_DISPATCH").length;
-  const inTransitCount = transfers.filter((t) => t.status === "IN_TRANSIT").length;
+  const sentCount = transfers.filter((t) => t.status === "SENT").length;
   const receivedCount = transfers.filter((t) => t.status === "RECEIVED").length;
   const totalPiecesMoved = transfers
     .filter((t) => t.status === "RECEIVED")
@@ -257,11 +228,11 @@ const StockTransfers = () => {
 
   return (
     <Layout
-      title={isAdmin ? "Inter-Store Stock Transfers (Admin)" : "Canteen Counter Transfer Desk"}
+      title={isAdmin ? "Inter-Store Stock Transfers" : "Canteen Stock Transfer Desk"}
       subtitle={
         isAdmin
-          ? "Admin Executive Master: Order and adjust stock transfers between military canteen counters"
-          : "Counter Staff Portal: Confirm 'Sent' for outgoing stock and 'Received' for incoming stock"
+          ? "Admin Executive Master: Order and adjust stock transfers between canteen counters"
+          : "Counter Staff Portal: Confirm 'Received' for incoming stock sent to your counter"
       }
       action={
         <div className="flex items-center gap-2">
@@ -290,7 +261,7 @@ const StockTransfers = () => {
       }
     >
       <div className="space-y-6">
-        {/* Role Banner */}
+        {/* Role Banner for Staff */}
         {!isAdmin && (
           <div className="bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-slate-850 dark:to-slate-800 border border-indigo-200/80 dark:border-slate-700 rounded-2xl p-4 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -302,7 +273,7 @@ const StockTransfers = () => {
                   Store Counter Transfer Desk ({user?.assigned_location?.name || `Counter #${user?.assigned_location_id}`})
                 </h4>
                 <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
-                  Admin authorizes all transfers. When items leave your counter, click <strong className="text-indigo-600">"Confirm Sent"</strong>. When items arrive at your counter, click <strong className="text-emerald-600">"Confirm Received"</strong>.
+                  Admin orders transfers between stores. When stock arrives at your counter, click <strong className="text-emerald-600">"Click Received"</strong> to add the pieces into your live counter stock.
                 </p>
               </div>
             </div>
@@ -310,42 +281,27 @@ const StockTransfers = () => {
         )}
 
         {/* Metric Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
           <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Awaiting Send</span>
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Sent (Awaiting Receipt)</span>
               <div className="p-2 rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400">
-                <Send className="w-4 h-4" />
+                <Send className="w-5 h-5" />
               </div>
             </div>
             <div className="mt-3 flex items-baseline gap-2">
               <span className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
-                {pendingDispatchCount}
+                {sentCount}
               </span>
-              <span className="text-xs text-amber-600 font-semibold">awaiting store dispatch</span>
+              <span className="text-xs text-amber-600 font-semibold">orders sent</span>
             </div>
           </div>
 
           <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">In Transit On Road</span>
-              <div className="p-2 rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400">
-                <Truck className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
-                {inTransitCount}
-              </span>
-              <span className="text-xs text-blue-600 font-semibold">awaiting store receipt</span>
-            </div>
-          </div>
-
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Completed Deliveries</span>
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Received (In Stock)</span>
               <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400">
-                <CheckCircle2 className="w-4 h-4" />
+                <CheckCircle2 className="w-5 h-5" />
               </div>
             </div>
             <div className="mt-3 flex items-baseline gap-2">
@@ -360,14 +316,14 @@ const StockTransfers = () => {
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Total Pieces Rebalanced</span>
               <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400">
-                <Boxes className="w-4 h-4" />
+                <Boxes className="w-5 h-5" />
               </div>
             </div>
             <div className="mt-3 flex items-baseline gap-2">
               <span className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
                 {totalPiecesMoved}
               </span>
-              <span className="text-xs text-slate-500">pieces transferred</span>
+              <span className="text-xs text-slate-500">pieces moved</span>
             </div>
           </div>
         </div>
@@ -377,8 +333,7 @@ const StockTransfers = () => {
           <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
             {[
               { id: "ALL", label: `All (${transfers.length})` },
-              { id: "PENDING_DISPATCH", label: `Awaiting Send (${pendingDispatchCount})` },
-              { id: "IN_TRANSIT", label: `In Transit (${inTransitCount})` },
+              { id: "SENT", label: `Sent (${sentCount})` },
               { id: "RECEIVED", label: `Received (${receivedCount})` },
               { id: "CANCELLED", label: `Cancelled` },
             ].map((tab) => (
@@ -420,7 +375,7 @@ const StockTransfers = () => {
               {statusFilter !== "ALL"
                 ? `No transfers matching status "${statusFilter}".`
                 : isAdmin
-                ? "Click 'New Stock Transfer' above to order a transfer between canteen counters."
+                ? "Click 'New Stock Transfer' above to transfer stock between canteen counters."
                 : "No active transfers currently assigned for your counter."}
             </p>
           </div>
@@ -441,8 +396,6 @@ const StockTransfers = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
                   {filteredTransfers.map((t) => {
-                    const isSenderStore =
-                      isAdmin || (user?.assigned_location_id && user.assigned_location_id === t.from_location_id);
                     const isReceiverStore =
                       isAdmin || (user?.assigned_location_id && user.assigned_location_id === t.to_location_id);
 
@@ -480,17 +433,11 @@ const StockTransfers = () => {
                           </div>
                         </td>
                         <td className="py-3.5 px-4">
-                          {t.status === "PENDING_DISPATCH" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800">
-                              <Clock className="w-3 h-3" />
-                              Awaiting Send
-                            </span>
-                          )}
-                          {t.status === "IN_TRANSIT" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-800">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                              <Truck className="w-3 h-3" />
-                              In Transit
+                          {t.status === "SENT" && (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                              <Send className="w-3 h-3" />
+                              Sent (Awaiting Receipt)
                             </span>
                           )}
                           {t.status === "RECEIVED" && (
@@ -507,34 +454,24 @@ const StockTransfers = () => {
                           )}
                         </td>
                         <td className="py-3.5 px-4 text-[11px] text-slate-500">
-                          <div>Ordered by <strong className="text-slate-700 dark:text-slate-300">{t.initiated_by_name}</strong></div>
-                          {t.sent_by_name && (
-                            <div className="text-indigo-600 dark:text-indigo-400 font-medium">
-                              Sent by {t.sent_by_name}
-                            </div>
-                          )}
+                          <div>Sent by <strong className="text-slate-700 dark:text-slate-300">{t.initiated_by_name}</strong></div>
                           {t.received_by_name && (
                             <div className="text-emerald-600 dark:text-emerald-400 font-medium">
                               Received by {t.received_by_name}
                             </div>
                           )}
+                          <div className="text-slate-400 mt-0.5">
+                            {new Date(t.created_at).toLocaleDateString("en-IN", {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                            })}
+                          </div>
                         </td>
                         <td className="py-3.5 px-4 text-right">
                           <div className="flex items-center justify-end gap-2">
-                            {/* ACTION 1: SEND CLICK OPTION (For Sending Store Staff or Admin) */}
-                            {t.status === "PENDING_DISPATCH" && isSenderStore && (
-                              <button
-                                type="button"
-                                onClick={() => handleSend(t)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm transition"
-                              >
-                                <Send className="w-3.5 h-3.5" />
-                                <span>Click Sent ({t.quantity} Pcs / {t.cases_display})</span>
-                              </button>
-                            )}
-
-                            {/* ACTION 2: RECEIVE CLICK OPTION (For Receiving Store Staff or Admin) */}
-                            {t.status === "IN_TRANSIT" && isReceiverStore && (
+                            {/* RECEIVE CLICK OPTION (For Receiving Store Staff or Admin) */}
+                            {t.status === "SENT" && isReceiverStore && (
                               <button
                                 type="button"
                                 onClick={() => handleReceive(t)}
@@ -545,8 +482,8 @@ const StockTransfers = () => {
                               </button>
                             )}
 
-                            {/* ACTION 3: CANCEL (Admin Master Only) */}
-                            {isAdmin && (t.status === "PENDING_DISPATCH" || t.status === "IN_TRANSIT") && (
+                            {/* CANCEL (Admin Master Only) */}
+                            {isAdmin && t.status === "SENT" && (
                               <button
                                 type="button"
                                 onClick={() => handleCancel(t)}
@@ -561,6 +498,11 @@ const StockTransfers = () => {
                             {t.status === "RECEIVED" && (
                               <span className="text-[11px] text-emerald-600 font-bold">
                                 Completed ✅
+                              </span>
+                            )}
+                            {t.status === "CANCELLED" && (
+                              <span className="text-[11px] text-slate-400 italic">
+                                Cancelled ❌
                               </span>
                             )}
                           </div>
@@ -696,30 +638,16 @@ const StockTransfers = () => {
                 )}
               </div>
 
-              {/* Instant Dispatch Option */}
-              <div className="flex items-center gap-2 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
-                <input
-                  type="checkbox"
-                  id="autoDispatchCheck"
-                  checked={autoDispatch}
-                  onChange={(e) => setAutoDispatch(e.target.checked)}
-                  className="rounded text-indigo-600 focus:ring-indigo-500"
-                />
-                <label htmlFor="autoDispatchCheck" className="text-slate-700 dark:text-slate-300 cursor-pointer">
-                  <strong>Mark as Dispatched immediately</strong> (Skips sending store employee dispatch click)
-                </label>
-              </div>
-
               {/* Notes */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Admin Transfer Memo (Optional)
+                  Transfer Notes (Optional)
                 </label>
                 <input
                   type="text"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder="e.g. Weekend restock order by Admin"
+                  placeholder="e.g. Ordered by Admin for weekend rush"
                   className="w-full text-xs p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
@@ -738,8 +666,8 @@ const StockTransfers = () => {
                   disabled={submitting}
                   className="inline-flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition disabled:opacity-50"
                 >
-                  <ArrowLeftRight className="w-4 h-4" />
-                  <span>{submitting ? "Ordering..." : "Order Transfer"}</span>
+                  <Send className="w-4 h-4" />
+                  <span>{submitting ? "Sending..." : `Send Stock (${enteredQty} Pcs / ${previewCases > 0 ? previewCases + " Cases" : enteredQty + " Pcs"})`}</span>
                 </button>
               </div>
             </form>
