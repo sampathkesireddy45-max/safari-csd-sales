@@ -1,24 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1e3a8a" />
-      <stop offset="50%" stop-color="#2563eb" />
-      <stop offset="100%" stop-color="#0284c7" />
+    <linearGradient id="safariGrad512" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="42%" stop-color="#7c3aed" />
+      <stop offset="78%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#ea580c" />
     </linearGradient>
   </defs>
-  <rect width="512" height="512" rx="120" fill="url(#grad)" />
-  <!-- Suitcase Handle -->
-  <path d="M196 140 V96 C196 78 210 64 228 64 H284 C302 64 316 78 316 96 V140" fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" />
-  <!-- Suitcase Body -->
-  <rect x="116" y="140" width="280" height="300" rx="40" fill="#ffffff" />
-  <!-- Ribs / Lines -->
-  <line x1="176" y1="180" x2="176" y2="400" stroke="#2563eb" stroke-width="14" stroke-linecap="round" />
-  <line x1="256" y1="180" x2="256" y2="400" stroke="#2563eb" stroke-width="14" stroke-linecap="round" />
-  <line x1="336" y1="180" x2="336" y2="400" stroke="#2563eb" stroke-width="14" stroke-linecap="round" />
-  <!-- Wheels -->
-  <circle cx="160" cy="456" r="16" fill="#0f172a" />
-  <circle cx="352" cy="456" r="16" fill="#0f172a" />
-  <!-- Star Badge -->
-  <circle cx="256" cy="290" r="32" fill="#f59e0b" />
-  <path d="M256 268 L263 282 L278 284 L267 295 L270 310 L256 302 L242 310 L245 295 L234 284 L249 282 Z" fill="#ffffff" />
+  <rect width="512" height="512" rx="116" fill="url(#safariGrad512)" />
+  <g transform="translate(106, 106) scale(12.5)" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 20a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2" />
+    <path d="M8 18V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v14" />
+    <path d="M10 20h4" />
+    <circle cx="16" cy="20" r="2" />
+    <circle cx="8" cy="20" r="2" />
+  </g>
 </svg>

@@ -31,7 +31,7 @@
   "start_url": "/",
   "id": "/",
   "background_color": "#0f172a",
-  "theme_color": "#1e40af",
+  "theme_color": "#4f46e5",
   "display": "standalone",
   "orientation": "portrait"
 }
