@@ -251,6 +251,35 @@ def get_employee_sales_dashboard(
         ).all()
         store_stock_map = {row[0]: int(row[1] or 0) for row in store_inv_rows}
 
+    # In-transit across entire fleet
+    in_transit_rows = db.query(
+        StockTransfer.product_id,
+        func.coalesce(func.sum(StockTransfer.quantity), 0)
+    ).filter(StockTransfer.status == "IN_TRANSIT").group_by(StockTransfer.product_id).all()
+    overall_in_transit_map = {row[0]: int(row[1] or 0) for row in in_transit_rows}
+
+    # Store specific transfers out and in
+    store_transfer_out_map = {}
+    store_transfer_in_map = {}
+    if selected_loc_id and not is_all_stores:
+        out_rows = db.query(
+            StockTransfer.product_id,
+            func.coalesce(func.sum(StockTransfer.quantity), 0)
+        ).filter(
+            StockTransfer.from_location_id == selected_loc_id,
+            StockTransfer.status.in_(["IN_TRANSIT", "RECEIVED"])
+        ).group_by(StockTransfer.product_id).all()
+        store_transfer_out_map = {row[0]: int(row[1] or 0) for row in out_rows}
+
+        in_rows = db.query(
+            StockTransfer.product_id,
+            func.coalesce(func.sum(StockTransfer.quantity), 0)
+        ).filter(
+            StockTransfer.to_location_id == selected_loc_id,
+            StockTransfer.status == "RECEIVED"
+        ).group_by(StockTransfer.product_id).all()
+        store_transfer_in_map = {row[0]: int(row[1] or 0) for row in in_rows}
+
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.index_no, Product.name).all()
 
     items = []
@@ -276,16 +305,19 @@ def get_employee_sales_dashboard(
         rate = p.selling_rate if p.selling_rate is not None else (p.rate_per_pc or 0.0)
         pack = p.case_pack if p.case_pack and p.case_pack > 0 else 1
 
-        # Individual store metrics
+        # Individual store metrics (Opening = Closing + Sold + Dispatched Out - Received In)
         store_closing = store_stock_map.get(p.id, 0)
         store_sold = store_sales_map.get(p.id, 0)
-        store_opening = store_closing + store_sold
+        store_transfer_out = store_transfer_out_map.get(p.id, 0)
+        store_transfer_in = store_transfer_in_map.get(p.id, 0)
+        store_opening = max(0, store_closing + store_sold + store_transfer_out - store_transfer_in)
         s_rev = round(store_sold * rate, 2)
 
-        # Overall network metrics (all stores)
+        # Overall network metrics (includes in-transit pieces so total network balances 100%)
         overall_closing = overall_stock_map.get(p.id, 0)
+        overall_in_transit = overall_in_transit_map.get(p.id, 0)
         overall_sold = overall_sales_map.get(p.id, 0)
-        overall_opening = overall_closing + overall_sold
+        overall_opening = overall_closing + overall_in_transit + overall_sold
         o_rev = round(overall_sold * rate, 2)
 
         # Employee's individual sales
@@ -524,13 +556,26 @@ def update_employee_opening_stock(
 
     pieces_sold = sales_q.scalar() or 0
 
-    if req.opening_stock < pieces_sold:
+    t_out = db.query(func.coalesce(func.sum(StockTransfer.quantity), 0)).filter(
+        StockTransfer.product_id == req.product_id,
+        StockTransfer.from_location_id == target_location_id,
+        StockTransfer.status.in_(["IN_TRANSIT", "RECEIVED"])
+    ).scalar() or 0
+
+    t_in = db.query(func.coalesce(func.sum(StockTransfer.quantity), 0)).filter(
+        StockTransfer.product_id == req.product_id,
+        StockTransfer.to_location_id == target_location_id,
+        StockTransfer.status == "RECEIVED"
+    ).scalar() or 0
+
+    min_required_opening = max(0, pieces_sold + t_out - t_in)
+    if req.opening_stock < min_required_opening:
         raise HTTPException(
             status_code=400,
-            detail=f"Opening stock ({req.opening_stock} PCS) cannot be less than the volume already sold ({pieces_sold} PCS) for {product.name} at {location.name}."
+            detail=f"Opening stock ({req.opening_stock} PCS) cannot be less than net volume reduced by sales & transfers ({min_required_opening} PCS) for {product.name} at {location.name}."
         )
 
-    new_closing_stock = req.opening_stock - pieces_sold
+    new_closing_stock = req.opening_stock - pieces_sold - t_out + t_in
 
     inv = db.query(Inventory).filter(
         Inventory.product_id == req.product_id,

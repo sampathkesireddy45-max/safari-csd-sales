@@ -135,6 +135,47 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
     if not is_specific_store:
         store_stock_map = overall_stock_map.copy()
 
+    # In-transit across entire fleet
+    in_transit_rows = db.query(
+        models.StockTransfer.product_id,
+        func.coalesce(func.sum(models.StockTransfer.quantity), 0)
+    ).filter(models.StockTransfer.status == "IN_TRANSIT").group_by(models.StockTransfer.product_id).all()
+    overall_in_transit_map = {row[0]: int(row[1] or 0) for row in in_transit_rows}
+
+    # Store specific transfers out and in
+    store_transfer_out_map = {}
+    store_transfer_in_map = {}
+    if is_specific_store:
+        target_store_id = None
+        if location_id and str(location_id).strip().lower() not in ["", "all", "0", "overall", "network"]:
+            try:
+                target_store_id = int(str(location_id).strip())
+            except ValueError:
+                pass
+        elif employee_id:
+            emp = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+            if emp:
+                target_store_id = emp.assigned_location_id
+
+        if target_store_id:
+            out_rows = db.query(
+                models.StockTransfer.product_id,
+                func.coalesce(func.sum(models.StockTransfer.quantity), 0)
+            ).filter(
+                models.StockTransfer.from_location_id == target_store_id,
+                models.StockTransfer.status.in_(["IN_TRANSIT", "RECEIVED"])
+            ).group_by(models.StockTransfer.product_id).all()
+            store_transfer_out_map = {row[0]: int(row[1] or 0) for row in out_rows}
+
+            in_rows = db.query(
+                models.StockTransfer.product_id,
+                func.coalesce(func.sum(models.StockTransfer.quantity), 0)
+            ).filter(
+                models.StockTransfer.to_location_id == target_store_id,
+                models.StockTransfer.status == "RECEIVED"
+            ).group_by(models.StockTransfer.product_id).all()
+            store_transfer_in_map = {row[0]: int(row[1] or 0) for row in in_rows}
+
     products = db.query(models.Product).filter(models.Product.is_active == True).order_by(models.Product.index_no, models.Product.name).all()
     
     index_wise = []
@@ -159,15 +200,18 @@ def _build_index_wise_sales(all_sales, db: Session, employee_id: int = None, loc
         revenue = round(pieces_sold * selling_rate, 2)
         cases_sold = round(pieces_sold / case_pack, 2)
 
-        # Overall numbers
+        # Overall numbers (includes in-transit pieces so total network reconciles 100%)
         overall_closing = overall_stock_map.get(p.id, 0)
+        overall_in_transit = overall_in_transit_map.get(p.id, 0)
         overall_sold = network_sales_map.get(p.id, 0)
-        overall_opening = overall_closing + overall_sold
+        overall_opening = overall_closing + overall_in_transit + overall_sold
 
-        # Store numbers
+        # Store numbers (Opening = Closing + Sold + Dispatched Out - Received In)
         store_closing = store_stock_map.get(p.id, 0)
+        store_transfer_out = store_transfer_out_map.get(p.id, 0)
+        store_transfer_in = store_transfer_in_map.get(p.id, 0)
         store_sold = pieces_sold
-        store_opening = store_closing + store_sold
+        store_opening = max(0, store_closing + store_sold + store_transfer_out - store_transfer_in)
 
         # Active view numbers (based on whether store is selected or overall)
         closing_stock = store_closing if is_specific_store else overall_closing
@@ -376,13 +420,26 @@ def update_admin_opening_stock(
 
     pieces_sold = sales_q.scalar() or 0
 
-    if req.opening_stock < pieces_sold:
+    t_out = db.query(func.coalesce(func.sum(models.StockTransfer.quantity), 0)).filter(
+        models.StockTransfer.product_id == req.product_id,
+        models.StockTransfer.from_location_id == req.location_id,
+        models.StockTransfer.status.in_(["IN_TRANSIT", "RECEIVED"])
+    ).scalar() or 0
+
+    t_in = db.query(func.coalesce(func.sum(models.StockTransfer.quantity), 0)).filter(
+        models.StockTransfer.product_id == req.product_id,
+        models.StockTransfer.to_location_id == req.location_id,
+        models.StockTransfer.status == "RECEIVED"
+    ).scalar() or 0
+
+    min_required_opening = max(0, pieces_sold + t_out - t_in)
+    if req.opening_stock < min_required_opening:
         raise HTTPException(
             status_code=400,
-            detail=f"Opening stock ({req.opening_stock} PCS) cannot be less than the volume already sold ({pieces_sold} PCS) for {product.name} at {location.name}."
+            detail=f"Opening stock ({req.opening_stock} PCS) cannot be less than net volume reduced by sales & transfers ({min_required_opening} PCS) for {product.name} at {location.name}."
         )
 
-    new_closing_stock = req.opening_stock - pieces_sold
+    new_closing_stock = req.opening_stock - pieces_sold - t_out + t_in
 
     inv = db.query(models.Inventory).filter(
         models.Inventory.product_id == req.product_id,
@@ -675,6 +732,10 @@ def get_admin_dashboard_stats(db: Session = Depends(get_db)):
         func.sum(models.Inventory.quantity)
     ).scalar()
     total_stock = total_stock_result if total_stock_result is not None else 0
+    total_in_transit = db.query(func.coalesce(func.sum(models.StockTransfer.quantity), 0)).filter(
+        models.StockTransfer.status == "IN_TRANSIT"
+    ).scalar() or 0
+    total_stock = total_stock + total_in_transit
 
     ist_today = to_ist(datetime.utcnow()).date()
     start_today = ist_date_to_utc_bounds(str(ist_today), is_end_date=False)
