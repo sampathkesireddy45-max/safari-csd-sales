@@ -310,17 +310,17 @@ const StockTransfers = () => {
       <div className="space-y-6">
         {/* Role Banner for Staff */}
         {!isAdmin && (
-          <div className="bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-slate-850 dark:to-slate-800 border border-indigo-200/80 dark:border-slate-700 rounded-2xl p-4 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-indigo-600 text-white">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-4 shadow-sm">
+            <div className="flex items-center gap-3.5">
+              <div className="p-2.5 rounded-xl bg-indigo-600 text-white shrink-0 shadow-sm">
                 <Boxes className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                <h4 className="text-xs font-extrabold text-slate-900 dark:text-white uppercase tracking-wider">
                   Store Counter Transfer Desk ({user?.assigned_location?.name || `Counter #${user?.assigned_location_id}`})
                 </h4>
-                <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
-                  Admin orders transfers between stores. When stock arrives at your counter, click <strong className="text-emerald-600">"Click Received"</strong> to verify actual count and add pieces to your live counter stock.
+                <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
+                  Admin orders transfers between stores. When stock arrives at your counter, click <strong className="text-emerald-600 dark:text-emerald-400 font-bold">"Click Received"</strong> to verify actual count and add pieces to your live counter stock.
                 </p>
               </div>
             </div>
@@ -450,7 +450,7 @@ const StockTransfers = () => {
                     const recvQty = t.received_quantity;
 
                     return (
-                      <tr key={t.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-850 transition">
+                      <tr key={t.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/60 transition">
                         <td className="py-3.5 px-4 font-mono font-bold text-slate-900 dark:text-white">
                           {t.transfer_number}
                         </td>
