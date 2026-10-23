@@ -506,10 +506,11 @@ export const sendStockTransfer = async (transferId) => {
   });
 };
 
-export const receiveStockTransfer = async (transferId) => {
+export const receiveStockTransfer = async (transferId, payload = {}) => {
   invalidateProductsCache();
   return await fetchApi(`/transfers/${transferId}/receive`, {
     method: "POST",
+    body: JSON.stringify(payload),
   });
 };
 

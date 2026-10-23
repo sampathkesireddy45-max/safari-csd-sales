@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean
 from sqlalchemy.orm import relationship
 from ..utils.database import Base
 import datetime
@@ -11,7 +11,12 @@ class StockTransfer(Base):
     from_location_id = Column(Integer, ForeignKey("locations.id"), nullable=False, index=True)
     to_location_id = Column(Integer, ForeignKey("locations.id"), nullable=False, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
-    quantity = Column(Integer, nullable=False)
+    quantity = Column(Integer, nullable=False)  # Dispatched quantity
+    dispatched_quantity = Column(Integer, nullable=False, default=0)
+    received_quantity = Column(Integer, nullable=True)
+    has_mismatch = Column(Boolean, default=False, nullable=False)
+    mismatch_quantity = Column(Integer, default=0, nullable=False)
+    mismatch_notes = Column(Text, nullable=True)
     status = Column(String, default="SENT", nullable=False, index=True)  # SENT, RECEIVED, CANCELLED
     initiated_by_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
     sent_by_id = Column(Integer, ForeignKey("employees.id"), nullable=True)

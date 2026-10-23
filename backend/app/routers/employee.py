@@ -258,27 +258,66 @@ def get_employee_sales_dashboard(
     ).filter(StockTransfer.status == "SENT").group_by(StockTransfer.product_id).all()
     overall_in_transit_map = {row[0]: int(row[1] or 0) for row in in_transit_rows}
 
-    # Store specific transfers out and in
+    # Store specific transfers out and in (Only completed 'RECEIVED' transfers move physical inventory)
     store_transfer_out_map = {}
     store_transfer_in_map = {}
+    store_damage_map = {}
     if selected_loc_id and not is_all_stores:
         out_rows = db.query(
             StockTransfer.product_id,
-            func.coalesce(func.sum(StockTransfer.quantity), 0)
+            func.coalesce(func.sum(StockTransfer.dispatched_quantity), 0)
         ).filter(
             StockTransfer.from_location_id == selected_loc_id,
-            StockTransfer.status.in_(["SENT", "RECEIVED"])
+            StockTransfer.status == "RECEIVED"
         ).group_by(StockTransfer.product_id).all()
         store_transfer_out_map = {row[0]: int(row[1] or 0) for row in out_rows}
 
         in_rows = db.query(
             StockTransfer.product_id,
-            func.coalesce(func.sum(StockTransfer.quantity), 0)
+            func.coalesce(func.sum(StockTransfer.received_quantity), 0)
         ).filter(
             StockTransfer.to_location_id == selected_loc_id,
             StockTransfer.status == "RECEIVED"
         ).group_by(StockTransfer.product_id).all()
         store_transfer_in_map = {row[0]: int(row[1] or 0) for row in in_rows}
+
+        damage_rows = db.query(
+            DamageReportItem.product_id,
+            func.coalesce(func.sum(DamageReportItem.quantity), 0)
+        ).join(
+            DamageReport, DamageReportItem.damage_report_id == DamageReport.id
+        ).filter(
+            DamageReport.location_id == selected_loc_id,
+            DamageReport.status != "replaced"
+        ).group_by(DamageReportItem.product_id).all()
+        store_damage_map = {row[0]: int(row[1] or 0) for row in damage_rows}
+
+    # Fleet-wide totals for damages and transfer differences
+    overall_damage_rows = db.query(
+        DamageReportItem.product_id,
+        func.coalesce(func.sum(DamageReportItem.quantity), 0)
+    ).join(
+        DamageReport, DamageReportItem.damage_report_id == DamageReport.id
+    ).filter(
+        DamageReport.status != "replaced"
+    ).group_by(DamageReportItem.product_id).all()
+    overall_damage_map = {row[0]: int(row[1] or 0) for row in overall_damage_rows}
+
+    fleet_out_rows = db.query(
+        StockTransfer.product_id,
+        func.coalesce(func.sum(StockTransfer.dispatched_quantity), 0)
+    ).filter(
+        StockTransfer.status == "RECEIVED"
+    ).group_by(StockTransfer.product_id).all()
+    fleet_transfer_out_map = {row[0]: int(row[1] or 0) for row in fleet_out_rows}
+
+    fleet_in_rows = db.query(
+        StockTransfer.product_id,
+        func.coalesce(func.sum(StockTransfer.received_quantity), 0)
+    ).filter(
+        StockTransfer.status == "RECEIVED"
+    ).group_by(StockTransfer.product_id).all()
+    fleet_transfer_in_map = {row[0]: int(row[1] or 0) for row in fleet_in_rows}
 
     products = db.query(Product).filter(Product.is_active == True).order_by(Product.index_no, Product.name).all()
 
@@ -305,19 +344,25 @@ def get_employee_sales_dashboard(
         rate = p.selling_rate if p.selling_rate is not None else (p.rate_per_pc or 0.0)
         pack = p.case_pack if p.case_pack and p.case_pack > 0 else 1
 
-        # Individual store metrics (Opening = Closing + Sold + Dispatched Out - Received In)
+        # Individual store metrics:
+        # Closing Stock = Opening Stock + Received In - Dispatched Out - Sold - Damaged
+        # Opening Stock = Closing Stock + Dispatched Out + Sold + Damaged - Received In
         store_closing = store_stock_map.get(p.id, 0)
         store_sold = store_sales_map.get(p.id, 0)
+        store_damaged = store_damage_map.get(p.id, 0)
         store_transfer_out = store_transfer_out_map.get(p.id, 0)
         store_transfer_in = store_transfer_in_map.get(p.id, 0)
-        store_opening = max(0, store_closing + store_sold + store_transfer_out - store_transfer_in)
+        store_opening = max(0, store_closing + store_sold + store_damaged + store_transfer_out - store_transfer_in)
         s_rev = round(store_sold * rate, 2)
 
-        # Overall network metrics (includes in-transit pieces so total network balances 100%)
+        # Overall network metrics:
+        # Fleet Opening = Fleet Closing + Fleet Sold + Fleet Damaged + Fleet Dispatched Out - Fleet Received In
         overall_closing = overall_stock_map.get(p.id, 0)
-        overall_in_transit = overall_in_transit_map.get(p.id, 0)
         overall_sold = overall_sales_map.get(p.id, 0)
-        overall_opening = overall_closing + overall_in_transit + overall_sold
+        overall_damaged = overall_damage_map.get(p.id, 0)
+        overall_t_out = fleet_transfer_out_map.get(p.id, 0)
+        overall_t_in = fleet_transfer_in_map.get(p.id, 0)
+        overall_opening = max(0, overall_closing + overall_sold + overall_damaged + overall_t_out - overall_t_in)
         o_rev = round(overall_sold * rate, 2)
 
         # Employee's individual sales
@@ -556,26 +601,35 @@ def update_employee_opening_stock(
 
     pieces_sold = sales_q.scalar() or 0
 
-    t_out = db.query(func.coalesce(func.sum(StockTransfer.quantity), 0)).filter(
-        StockTransfer.product_id == req.product_id,
-        StockTransfer.from_location_id == target_location_id,
-        StockTransfer.status.in_(["SENT", "RECEIVED"])
+    damaged_qty = db.query(func.coalesce(func.sum(DamageReportItem.quantity), 0)).join(
+        DamageReport, DamageReportItem.damage_report_id == DamageReport.id
+    ).filter(
+        DamageReportItem.product_id == req.product_id,
+        DamageReport.location_id == target_location_id,
+        DamageReport.status != "replaced"
     ).scalar() or 0
 
-    t_in = db.query(func.coalesce(func.sum(StockTransfer.quantity), 0)).filter(
+    t_out = db.query(func.coalesce(func.sum(StockTransfer.dispatched_quantity), 0)).filter(
+        StockTransfer.product_id == req.product_id,
+        StockTransfer.from_location_id == target_location_id,
+        StockTransfer.status == "RECEIVED"
+    ).scalar() or 0
+
+    t_in = db.query(func.coalesce(func.sum(StockTransfer.received_quantity), 0)).filter(
         StockTransfer.product_id == req.product_id,
         StockTransfer.to_location_id == target_location_id,
         StockTransfer.status == "RECEIVED"
     ).scalar() or 0
 
-    min_required_opening = max(0, pieces_sold + t_out - t_in)
+    # Closing Stock = Opening Stock + Received In - Dispatched Out - Sold - Damaged
+    min_required_opening = max(0, pieces_sold + damaged_qty + t_out - t_in)
     if req.opening_stock < min_required_opening:
         raise HTTPException(
             status_code=400,
-            detail=f"Opening stock ({req.opening_stock} PCS) cannot be less than net volume reduced by sales & transfers ({min_required_opening} PCS) for {product.name} at {location.name}."
+            detail=f"Opening stock ({req.opening_stock} PCS) cannot be less than net volume reduced by sales, damages & transfers ({min_required_opening} PCS) for {product.name} at {location.name}."
         )
 
-    new_closing_stock = req.opening_stock - pieces_sold - t_out + t_in
+    new_closing_stock = req.opening_stock + t_in - t_out - pieces_sold - damaged_qty
 
     inv = db.query(Inventory).filter(
         Inventory.product_id == req.product_id,

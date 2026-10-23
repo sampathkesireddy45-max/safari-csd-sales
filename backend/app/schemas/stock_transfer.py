@@ -7,7 +7,10 @@ class StockTransferCreate(BaseModel):
     to_location_id: int
     product_id: int
     quantity: int
-    auto_dispatch: Optional[bool] = False  # If True, mark as IN_TRANSIT immediately; if False, PENDING_DISPATCH for store staff
+    notes: Optional[str] = None
+
+class StockTransferReceiveRequest(BaseModel):
+    received_quantity: Optional[int] = None
     notes: Optional[str] = None
 
 class StockTransferResponse(BaseModel):
@@ -21,6 +24,11 @@ class StockTransferResponse(BaseModel):
     product_name: Optional[str] = None
     product_index: Optional[str] = None
     quantity: int
+    dispatched_quantity: int = 0
+    received_quantity: Optional[int] = None
+    has_mismatch: bool = False
+    mismatch_quantity: int = 0
+    mismatch_notes: Optional[str] = None
     case_pack: Optional[int] = 1
     cases: Optional[int] = 0
     remainder_pieces: Optional[int] = 0

@@ -103,7 +103,7 @@ def create_damage_report(db: Session, damage_report: schemas.DamageReportCreate,
     db.commit()
     db.refresh(db_damage_report)
 
-    # Create damage report items
+    # Create damage report items and reduce live store inventory
     for item in (damage_report.items or []):
         db_damage_report_item = models.DamageReportItem(
             damage_report_id=db_damage_report.id,
@@ -112,6 +112,24 @@ def create_damage_report(db: Session, damage_report: schemas.DamageReportCreate,
             description=item.description
         )
         db.add(db_damage_report_item)
+
+        # Deduct damaged pieces immediately from store inventory
+        if damage_report.location_id and item.quantity > 0:
+            inv = db.query(models.Inventory).filter(
+                models.Inventory.product_id == item.product_id,
+                models.Inventory.location_id == damage_report.location_id
+            ).first()
+            if inv:
+                inv.quantity = max(0, inv.quantity - item.quantity)
+                db.add(models.InventoryTransaction(
+                    inventory_id=inv.id,
+                    quantity_change=-item.quantity,
+                    transaction_type="damaged",
+                    reference_id=db_damage_report.id,
+                    reference_type="damage_report",
+                    performed_by=current_user_id or damage_report.employee_id,
+                    notes=f"Damaged {item.quantity} pcs reported (Report #{db_damage_report.id})"
+                ))
 
     # Create damage photos
     for photo in (damage_report.photos or []):

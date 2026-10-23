@@ -21,6 +21,8 @@ import {
   RefreshCw,
   ArrowRight,
   Send,
+  AlertTriangle,
+  AlertCircle,
 } from "lucide-react";
 import ProductSearchSelect from "../components/ProductSearchSelect";
 import { TableSkeleton } from "../components/LoadingSkeleton";
@@ -48,6 +50,12 @@ const StockTransfers = () => {
   const [quantity, setQuantity] = useState("");
   const [notes, setNotes] = useState("");
   const [sourceStock, setSourceStock] = useState(null);
+
+  // Receive Confirmation Modal State (For Counter Staff & Admin)
+  const [receiveModalTransfer, setReceiveModalTransfer] = useState(null);
+  const [receivedQtyInput, setReceivedQtyInput] = useState("");
+  const [receiveNotes, setReceiveNotes] = useState("");
+  const [receivingSubmitting, setReceivingSubmitting] = useState(false);
 
   const loadData = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -148,7 +156,7 @@ const StockTransfers = () => {
       };
       const created = await createStockTransfer(payload);
       addToast(
-        `Sent ${qty} pcs (${created.cases_display}) from ${created.from_location_name} to ${created.to_location_name}!`,
+        `Dispatched ${qty} pcs (${created.cases_display}) from ${created.from_location_name} to ${created.to_location_name}!`,
         "success"
       );
       setIsModalOpen(false);
@@ -161,22 +169,53 @@ const StockTransfers = () => {
     }
   };
 
-  const handleReceive = async (transfer) => {
-    const confirmReceive = window.confirm(
-      `Confirm receipt of ${transfer.quantity} Pieces (${transfer.cases_display}) at ${transfer.to_location_name}?`
-    );
-    if (!confirmReceive) return;
+  const handleOpenReceiveModal = (transfer) => {
+    setReceiveModalTransfer(transfer);
+    const defaultQty = transfer.dispatched_quantity || transfer.quantity;
+    setReceivedQtyInput(String(defaultQty));
+    setReceiveNotes("");
+  };
 
+  const handleConfirmReceive = async (e) => {
+    e.preventDefault();
+    if (!receiveModalTransfer) return;
+
+    const enteredRecv = parseInt(receivedQtyInput, 10);
+    if (isNaN(enteredRecv) || enteredRecv < 0) {
+      addToast("Please enter a valid received quantity (0 or more pieces).", "error");
+      return;
+    }
+
+    const dispQty = receiveModalTransfer.dispatched_quantity || receiveModalTransfer.quantity;
+    const hasDiff = enteredRecv !== dispQty;
+
+    setReceivingSubmitting(true);
     try {
-      await receiveStockTransfer(transfer.id);
-      addToast(
-        `✅ Received ${transfer.quantity} Pieces (${transfer.cases_display}) at ${transfer.to_location_name}! Stock added to counter.`,
-        "success"
-      );
+      await receiveStockTransfer(receiveModalTransfer.id, {
+        received_quantity: enteredRecv,
+        notes: receiveNotes.trim() || undefined,
+      });
+
+      if (hasDiff) {
+        const diff = dispQty - enteredRecv;
+        addToast(
+          `⚠️ Received ${enteredRecv} Pcs at ${receiveModalTransfer.to_location_name}. Discrepancy of ${diff > 0 ? `-${diff}` : `+${Math.abs(diff)}`} pcs recorded!`,
+          "warning"
+        );
+      } else {
+        addToast(
+          `✅ Confirmed exact receipt of ${enteredRecv} Pcs at ${receiveModalTransfer.to_location_name}! Stock added to counter.`,
+          "success"
+        );
+      }
+
+      setReceiveModalTransfer(null);
       loadData(true);
     } catch (err) {
       console.error("Failed to receive transfer:", err);
       addToast(err.message || "Failed to confirm receipt", "error");
+    } finally {
+      setReceivingSubmitting(false);
     }
   };
 
@@ -186,7 +225,7 @@ const StockTransfers = () => {
       return;
     }
     const confirmCancel = window.confirm(
-      `Cancel transfer #${transfer.transfer_number}? Pieces will be returned to ${transfer.from_location_name}.`
+      `Cancel transfer #${transfer.transfer_number}? Pieces will remain at ${transfer.from_location_name}.`
     );
     if (!confirmCancel) return;
 
@@ -218,7 +257,7 @@ const StockTransfers = () => {
   const receivedCount = transfers.filter((t) => t.status === "RECEIVED").length;
   const totalPiecesMoved = transfers
     .filter((t) => t.status === "RECEIVED")
-    .reduce((sum, t) => sum + (t.quantity || 0), 0);
+    .reduce((sum, t) => sum + (t.received_quantity !== null && t.received_quantity !== undefined ? t.received_quantity : t.quantity || 0), 0);
 
   // Helper for pieces-to-cases live preview in Admin modal
   const pack = selectedProduct?.case_pack || 1;
@@ -226,12 +265,20 @@ const StockTransfers = () => {
   const previewCases = Math.floor(enteredQty / pack);
   const previewRemainder = enteredQty % pack;
 
+  // Helper for pieces-to-cases live preview in Receive modal
+  const recvPack = receiveModalTransfer?.case_pack || 1;
+  const enteredRecvQty = parseInt(receivedQtyInput, 10) || 0;
+  const previewRecvCases = Math.floor(enteredRecvQty / recvPack);
+  const previewRecvRemainder = enteredRecvQty % recvPack;
+  const dispQtyForModal = receiveModalTransfer ? (receiveModalTransfer.dispatched_quantity || receiveModalTransfer.quantity) : 0;
+  const recvMismatchDiff = dispQtyForModal - enteredRecvQty;
+
   return (
     <Layout
       title={isAdmin ? "Inter-Store Stock Transfers" : "Canteen Stock Transfer Desk"}
       subtitle={
         isAdmin
-          ? "Admin Executive Master: Order and adjust stock transfers between canteen counters"
+          ? "Admin Executive Master: Order stock transfers between canteen counters with atomic reconciliation"
           : "Counter Staff Portal: Confirm 'Received' for incoming stock sent to your counter"
       }
       action={
@@ -273,7 +320,7 @@ const StockTransfers = () => {
                   Store Counter Transfer Desk ({user?.assigned_location?.name || `Counter #${user?.assigned_location_id}`})
                 </h4>
                 <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
-                  Admin orders transfers between stores. When stock arrives at your counter, click <strong className="text-emerald-600">"Click Received"</strong> to add the pieces into your live counter stock.
+                  Admin orders transfers between stores. When stock arrives at your counter, click <strong className="text-emerald-600">"Click Received"</strong> to verify actual count and add pieces to your live counter stock.
                 </p>
               </div>
             </div>
@@ -388,9 +435,9 @@ const StockTransfers = () => {
                     <th className="py-3.5 px-4">Transfer ID</th>
                     <th className="py-3.5 px-4">Counter Route (From ➔ To)</th>
                     <th className="py-3.5 px-4">Safari SKU Details</th>
-                    <th className="py-3.5 px-4 text-center">Pieces & Cases</th>
-                    <th className="py-3.5 px-4">Status</th>
-                    <th className="py-3.5 px-4">Timeline / Audit</th>
+                    <th className="py-3.5 px-4 text-center">Dispatched & Received</th>
+                    <th className="py-3.5 px-4">Status & Audit</th>
+                    <th className="py-3.5 px-4">Timeline</th>
                     <th className="py-3.5 px-4 text-right">Click Option</th>
                   </tr>
                 </thead>
@@ -398,6 +445,9 @@ const StockTransfers = () => {
                   {filteredTransfers.map((t) => {
                     const isReceiverStore =
                       isAdmin || (user?.assigned_location_id && user.assigned_location_id === t.to_location_id);
+
+                    const dispQty = t.dispatched_quantity || t.quantity;
+                    const recvQty = t.received_quantity;
 
                     return (
                       <tr key={t.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-850 transition">
@@ -424,12 +474,25 @@ const StockTransfers = () => {
                         </td>
                         <td className="py-3.5 px-4 text-center">
                           <div className="inline-flex flex-col items-center">
-                            <span className="px-2.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-mono font-extrabold text-xs">
-                              {t.quantity} Pieces
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="px-2.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-mono font-extrabold text-xs">
+                                {dispQty} Pcs Dispatched
+                              </span>
+                              {t.status === "RECEIVED" && recvQty !== null && (
+                                <span className={`px-2 py-0.5 rounded-md font-mono font-bold text-xs ${t.has_mismatch ? "bg-rose-50 text-rose-700 border border-rose-200" : "bg-emerald-50 text-emerald-700"}`}>
+                                  {recvQty} Pcs Recv
+                                </span>
+                              )}
+                            </div>
                             <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
                               {t.cases_display}
                             </span>
+                            {t.has_mismatch && (
+                              <span className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-300">
+                                <AlertTriangle className="w-3 h-3 text-rose-600" />
+                                <span>Mismatch: {t.mismatch_quantity > 0 ? `-${t.mismatch_quantity}` : `+${Math.abs(t.mismatch_quantity)}`} Pcs</span>
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="py-3.5 px-4">
@@ -441,10 +504,17 @@ const StockTransfers = () => {
                             </span>
                           )}
                           {t.status === "RECEIVED" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800">
-                              <CheckCircle2 className="w-3 h-3" />
-                              Received
-                            </span>
+                            <div className="space-y-1">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800">
+                                <CheckCircle2 className="w-3 h-3" />
+                                Received
+                              </span>
+                              {t.mismatch_notes && (
+                                <p className="text-[10px] text-rose-600 dark:text-rose-400 max-w-xs truncate" title={t.mismatch_notes}>
+                                  {t.mismatch_notes}
+                                </p>
+                              )}
+                            </div>
                           )}
                           {t.status === "CANCELLED" && (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-800">
@@ -454,10 +524,10 @@ const StockTransfers = () => {
                           )}
                         </td>
                         <td className="py-3.5 px-4 text-[11px] text-slate-500">
-                          <div>Sent by <strong className="text-slate-700 dark:text-slate-300">{t.initiated_by_name}</strong></div>
+                          <div>Dispatched: <strong className="text-slate-700 dark:text-slate-300">{t.initiated_by_name}</strong></div>
                           {t.received_by_name && (
                             <div className="text-emerald-600 dark:text-emerald-400 font-medium">
-                              Received by {t.received_by_name}
+                              Recv: {t.received_by_name}
                             </div>
                           )}
                           <div className="text-slate-400 mt-0.5">
@@ -474,11 +544,11 @@ const StockTransfers = () => {
                             {t.status === "SENT" && isReceiverStore && (
                               <button
                                 type="button"
-                                onClick={() => handleReceive(t)}
+                                onClick={() => handleOpenReceiveModal(t)}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-sm transition"
                               >
                                 <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>Click Received ({t.quantity} Pcs / {t.cases_display})</span>
+                                <span>Click Received</span>
                               </button>
                             )}
 
@@ -497,7 +567,7 @@ const StockTransfers = () => {
 
                             {t.status === "RECEIVED" && (
                               <span className="text-[11px] text-emerald-600 font-bold">
-                                Completed ✅
+                                Received ✅
                               </span>
                             )}
                             {t.status === "CANCELLED" && (
@@ -516,6 +586,143 @@ const StockTransfers = () => {
           </div>
         )}
       </div>
+
+      {/* Confirmation Modal for Receiving Counter Staff */}
+      {receiveModalTransfer && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">Confirm Stock Receipt</h3>
+                  <p className="text-xs text-slate-500">Verify actual count delivered to your store counter</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReceiveModalTransfer(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Route & SKU Summary */}
+            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-3.5 space-y-2 border border-slate-200/80 dark:border-slate-700/60 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Route:</span>
+                <span className="font-semibold text-slate-900 dark:text-white">
+                  {receiveModalTransfer.from_location_name} ➔ {receiveModalTransfer.to_location_name}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Item:</span>
+                <span className="font-bold text-slate-900 dark:text-white">
+                  {receiveModalTransfer.product_name}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Dispatched Quantity:</span>
+                <span className="font-mono font-extrabold text-indigo-600 dark:text-indigo-400">
+                  {dispQtyForModal} Pieces ({receiveModalTransfer.cases_display})
+                </span>
+              </div>
+            </div>
+
+            <form onSubmit={handleConfirmReceive} className="space-y-4">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Actual Pieces Counted at Counter
+                  </label>
+                  <span className="text-[11px] text-slate-500">
+                    Pack: {recvPack} pcs/case
+                  </span>
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  value={receivedQtyInput}
+                  onChange={(e) => setReceivedQtyInput(e.target.value)}
+                  required
+                  autoFocus
+                  className="w-full text-sm p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500 font-mono font-bold"
+                />
+
+                {/* Live Cases Breakdown */}
+                {enteredRecvQty >= 0 && (
+                  <div className="mt-2 p-2 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    <span>Equivalent Breakdown:</span>
+                    <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                      {previewRecvCases > 0 ? `${previewRecvCases} Case${previewRecvCases > 1 ? "s" : ""}` : ""}
+                      {previewRecvRemainder > 0 ? `${previewRecvCases > 0 ? " + " : ""}${previewRecvRemainder} Piece${previewRecvRemainder > 1 ? "s" : ""}` : ""}
+                      {enteredRecvQty === 0 ? "0 Pieces" : ""}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Mismatch Warning Alert */}
+              {recvMismatchDiff !== 0 && (
+                <div className={`p-3 rounded-xl border text-xs ${recvMismatchDiff > 0 ? "bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200" : "bg-blue-50 dark:bg-blue-950/40 border-blue-300 dark:border-blue-800 text-blue-900 dark:text-blue-200"}`}>
+                  <div className="font-bold flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>
+                      {recvMismatchDiff > 0
+                        ? `⚠️ Quantity Shortage (${recvMismatchDiff} pieces missing)`
+                        : `ℹ️ Quantity Surplus (+${Math.abs(recvMismatchDiff)} extra pieces)`}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px]">
+                    Dispatched: {dispQtyForModal} pcs | You are confirming: {enteredRecvQty} pcs.
+                    A mismatch discrepancy flag will be permanently tagged on this transfer record.
+                  </p>
+                </div>
+              )}
+
+              {/* Notes */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Counter Receipt Remarks {recvMismatchDiff !== 0 ? "(Discrepancy Reason)" : "(Optional)"}
+                </label>
+                <input
+                  type="text"
+                  value={receiveNotes}
+                  onChange={(e) => setReceiveNotes(e.target.value)}
+                  placeholder={recvMismatchDiff !== 0 ? "e.g. 2 pieces damaged/crushed in transport" : "e.g. Received intact in good order"}
+                  className="w-full text-xs p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setReceiveModalTransfer(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={receivingSubmitting}
+                  className="inline-flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition disabled:opacity-50"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>
+                    {receivingSubmitting
+                      ? "Confirming..."
+                      : `Confirm & Add ${enteredRecvQty} Pcs to Stock`}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Admin Only Stock Transfer Order Modal */}
       {isModalOpen && isAdmin && (

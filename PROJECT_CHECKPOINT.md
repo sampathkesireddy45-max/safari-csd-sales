@@ -1,7 +1,43 @@
 # Safari CSD Sales & Stock Telemetry - Session Checkpoint
 
-**Last Saved Timestamp:** October 23, 2026 - 19:00 IST  
+**Last Saved Timestamp:** October 23, 2026 - 19:45 IST  
 **Workspace Path:** `C:\Users\sampa\overall sales`  
+
+---
+
+## 🧮 Final Stock Calculation Formulas & Transfer Specification Implementation (Verified)
+
+### 1. Mathematical Formulas & Identity Compliance
+- **Store-Level Formulas**:
+  $$\text{Opening Stock} = \text{Previous Day's Closing Stock}$$
+  $$\text{Closing Stock} = \text{Opening Stock} + \text{Received In} - \text{Dispatched Out} - \text{Sold} - \text{Damaged}$$
+  $$\text{Store Closing Stock} \ge 0$$
+- **Overall Fleet Formulas**:
+  $$\text{Total Fleet Opening Stock} = \sum_{\text{stores}} \text{Opening Stock}$$
+  $$\text{Total Fleet Closing Stock} = \sum_{\text{stores}} \text{Closing Stock}$$
+  $$\Delta \text{Fleet Inventory from Internal Transfers} = 0$$
+
+### 2. Stock Transfer Specification & Atomic Workflow
+- **Admin Only Initiation**: Only Administrators can create/order stock transfers (`POST /transfers/`). Status begins as `SENT`.
+- **Atomic Stock Movement on Receipt**:
+  - Source store stock is **NOT** deducted prematurely while in `SENT` status, preventing phantom pieces or uncounted inventory.
+  - When the receiving store employee clicks **"Click Received"**, a verification modal prompts for the actual counted piece count (`received_quantity`).
+  - Upon confirmation:
+    1. Source store inventory is reduced by `dispatched_quantity`.
+    2. Destination store inventory is increased by `received_quantity`.
+    3. Two separate `InventoryTransaction` records are created: `transfer_dispatched_out` and `transfer_received_in`.
+- **Mismatch Detection & Discrepancy Flagging**:
+  - If `received_quantity != dispatched_quantity`:
+    - `has_mismatch = True`
+    - `mismatch_quantity = dispatched_quantity - received_quantity`
+    - `mismatch_notes` logs the difference and reason.
+    - Displayed with visual warning badges (`⚠️ Mismatch: -X pcs`) in the Transfer Desk table.
+- **Admin Cancellation**:
+  - Admin can cancel transfers in `SENT` status (`POST /transfers/{id}/cancel`). Since stock was not deducted, no refund adjustment is required.
+
+### 3. Damage Integration
+- Creating damage reports (`backend/app/crud/damage_report.py`) deducts damaged pieces immediately from `models.Inventory` and logs `InventoryTransaction(transaction_type="damaged")`.
+- Store and fleet opening stock computations incorporate damaged pieces (`+ store_damaged`), ensuring the identity $\text{Closing} = \text{Opening} + \text{Received} - \text{Dispatched} - \text{Sold} - \text{Damaged}$ holds true.
 
 ---
 
