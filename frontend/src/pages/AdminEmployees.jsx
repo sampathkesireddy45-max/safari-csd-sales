@@ -36,6 +36,7 @@ const AdminEmployees = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editEmployee, setEditEmployee] = useState(null);
+  const [changePasswordInEdit, setChangePasswordInEdit] = useState(false);
   const [formData, setFormData] = useState({
     employee_id: "",
     name: "",
@@ -69,6 +70,7 @@ const AdminEmployees = () => {
 
   const handleOpenAddModal = () => {
     setShowAddModal(true);
+    setChangePasswordInEdit(true);
     setFormData({
       employee_id: `EMP${Math.floor(100 + Math.random() * 900)}`,
       name: "",
@@ -83,6 +85,7 @@ const AdminEmployees = () => {
 
   const handleOpenEditModal = (emp) => {
     setEditEmployee(emp);
+    setChangePasswordInEdit(false);
     setFormData({
       employee_id: emp.employee_id,
       name: emp.name,
@@ -100,6 +103,7 @@ const AdminEmployees = () => {
     setShowAddModal(false);
     setShowEditModal(false);
     setEditEmployee(null);
+    setChangePasswordInEdit(false);
   };
 
   const handleChange = (e) => {
@@ -114,7 +118,10 @@ const AdminEmployees = () => {
         ...formData,
         assigned_location_id: formData.assigned_location_id ? parseInt(formData.assigned_location_id, 10) : null,
       };
-      if (!payload.password || !payload.password.trim()) {
+
+      if (showEditModal && !changePasswordInEdit) {
+        delete payload.password;
+      } else if (!payload.password || !payload.password.trim()) {
         delete payload.password;
       } else {
         payload.password = payload.password.trim();
@@ -126,10 +133,25 @@ const AdminEmployees = () => {
 
       if (showAddModal) {
         await createEmployee(payload);
+        if (payload.password) {
+          try {
+            const stored = JSON.parse(localStorage.getItem("safari_staff_passwords") || "{}");
+            stored[payload.employee_id] = payload.password;
+            stored[(payload.employee_id || "").toUpperCase()] = payload.password;
+            localStorage.setItem("safari_staff_passwords", JSON.stringify(stored));
+          } catch (e) {}
+        }
         addToast("Employee created successfully!", "success");
       } else if (showEditModal && editEmployee) {
         await updateEmployee(editEmployee.id, payload);
         if (payload.password) {
+          try {
+            const stored = JSON.parse(localStorage.getItem("safari_staff_passwords") || "{}");
+            stored[editEmployee.id] = payload.password;
+            stored[editEmployee.employee_id] = payload.password;
+            stored[(editEmployee.employee_id || "").toUpperCase()] = payload.password;
+            localStorage.setItem("safari_staff_passwords", JSON.stringify(stored));
+          } catch (e) {}
           addToast(`Employee & new password updated for ${editEmployee.name} (${editEmployee.employee_id})!`, "success");
         } else {
           addToast("Employee updated successfully!", "success");
@@ -384,23 +406,61 @@ const AdminEmployees = () => {
                 />
               </div>
 
-              <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">
-                  {showAddModal ? "Employee Password (Set by Admin) *" : "Reset Employee Password (Optional)"}
-                </label>
-                <input
-                  type="text"
-                  required={showAddModal}
-                  name="password"
-                  value={formData.password}
-                  onChange={handleChange}
-                  placeholder={showAddModal ? "Set password for employee" : "Leave blank to keep current password"}
-                  className="w-full text-xs px-3 py-2 border rounded-xl border-slate-300 focus:ring-2 focus:ring-indigo-500 font-mono"
-                />
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Staff passwords are set exclusively by Admin. Provide this password to the employee to sign in.
-                </p>
-              </div>
+              {showAddModal ? (
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">
+                    Employee Password (Set by Admin) *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    name="password"
+                    value={formData.password}
+                    onChange={handleChange}
+                    autoComplete="new-password"
+                    placeholder="Set password for employee"
+                    className="w-full text-xs px-3 py-2 border rounded-xl border-slate-300 focus:ring-2 focus:ring-indigo-500 font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Staff passwords are set exclusively by Admin. Provide this password to the employee to sign in.
+                  </p>
+                </div>
+              ) : (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={changePasswordInEdit}
+                      onChange={(e) => {
+                        setChangePasswordInEdit(e.target.checked);
+                        if (!e.target.checked) {
+                          setFormData((prev) => ({ ...prev, password: "" }));
+                        }
+                      }}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-4 w-4"
+                    />
+                    <span className="text-xs font-semibold text-slate-700">
+                      Reset / Change Employee Password
+                    </span>
+                  </label>
+                  {changePasswordInEdit && (
+                    <div className="pt-2">
+                      <input
+                        type="text"
+                        name="password"
+                        value={formData.password}
+                        onChange={handleChange}
+                        autoComplete="new-password"
+                        placeholder="Enter new password (min 4 characters)"
+                        className="w-full text-xs px-3 py-2 border rounded-xl border-slate-300 focus:ring-2 focus:ring-indigo-500 font-mono bg-white"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        Will immediately update login password for this employee.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100">
                 <button

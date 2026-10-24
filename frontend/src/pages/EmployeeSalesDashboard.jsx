@@ -256,7 +256,7 @@ const EmployeeSalesDashboard = () => {
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             {/* Store Opening Stock */}
             <div className="bg-gradient-to-br from-blue-50/80 to-white rounded-2xl p-4 border border-blue-200/80 shadow-sm relative overflow-hidden">
               <div className="flex items-center justify-between text-blue-600 mb-1.5">
@@ -319,23 +319,6 @@ const EmployeeSalesDashboard = () => {
               <div className="text-[11px] font-medium text-slate-500 mt-1 flex items-center justify-between">
                 <span>Store Sales Period</span>
                 <span className="font-mono font-bold text-emerald-700">₹{(summary.store_revenue ?? 0).toLocaleString("en-IN")}</span>
-              </div>
-            </div>
-
-            {/* My Personal Sold Counter */}
-            <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
-              <div className="flex items-center justify-between text-slate-500 mb-1.5">
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-700">
-                  My Personal Counter Sales
-                </span>
-                <Sparkles className="w-4 h-4 text-amber-500" />
-              </div>
-              <div className="text-2xl font-black text-slate-900">
-                {(summary.my_pieces_sold ?? summary.total_pieces_sold ?? 0).toLocaleString()} <span className="text-xs font-bold text-slate-400">PCS</span>
-              </div>
-              <div className="text-[11px] font-medium text-slate-500 mt-1 flex items-center justify-between">
-                <span>{summary.sales_count ?? 0} Receipts</span>
-                <span className="font-mono font-bold text-emerald-700">₹{(summary.my_revenue ?? summary.total_revenue ?? 0).toLocaleString("en-IN")}</span>
               </div>
             </div>
 

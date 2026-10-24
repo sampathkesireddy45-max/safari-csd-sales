@@ -38,7 +38,24 @@ const AdminCredentials = () => {
   const [savingPassword, setSavingPassword] = useState(false);
   const [removingEmployeeId, setRemovingEmployeeId] = useState(null);
   const [passwordSuccessData, setPasswordSuccessData] = useState(null);
-  const [sessionPasswords, setSessionPasswords] = useState({});
+  const [sessionPasswords, setSessionPasswords] = useState(() => {
+    try {
+      const stored = localStorage.getItem("safari_staff_passwords");
+      return stored ? JSON.parse(stored) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
+  const saveToSessionPasswords = (newEntries) => {
+    setSessionPasswords((prev) => {
+      const updated = { ...prev, ...newEntries };
+      try {
+        localStorage.setItem("safari_staff_passwords", JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  };
 
   // Copied state indicator
   const [copiedId, setCopiedId] = useState(null);
@@ -87,7 +104,8 @@ const AdminCredentials = () => {
   const handleOpenPasswordModal = (emp) => {
     setSelectedEmployee(emp);
     setPasswordSuccessData(null);
-    setNewPassword(sessionPasswords[emp.id] || generateRandomPassword());
+    const existingPwd = sessionPasswords[emp.id] || sessionPasswords[emp.employee_id] || sessionPasswords[(emp.employee_id || "").toUpperCase()] || "";
+    setNewPassword(existingPwd || generateRandomPassword());
     setShowPlainPassword(true);
     setShowPasswordModal(true);
   };
@@ -126,11 +144,11 @@ const AdminCredentials = () => {
     setSavingPassword(true);
     try {
       await resetEmployeePassword(selectedEmployee.id, cleanPassword);
-      setSessionPasswords((prev) => ({
-        ...prev,
+      saveToSessionPasswords({
         [selectedEmployee.id]: cleanPassword,
         [selectedEmployee.employee_id]: cleanPassword,
-      }));
+        [(selectedEmployee.employee_id || "").toUpperCase()]: cleanPassword,
+      });
 
       setPasswordSuccessData({
         employee: selectedEmployee,
@@ -149,7 +167,11 @@ const AdminCredentials = () => {
 
   const handleCopyCredentials = (emp, pwd = null) => {
     const loc = locations.find((l) => l.id === emp.assigned_location_id);
-    const effectivePwd = pwd || sessionPasswords[emp.id] || sessionPasswords[emp.employee_id] || "[Admin Configured Password]";
+    const effectivePwd = pwd 
+      || sessionPasswords[emp.id] 
+      || sessionPasswords[emp.employee_id] 
+      || sessionPasswords[(emp.employee_id || "").toUpperCase()] 
+      || "canteen@123";
     const slip = `=====================================
 SAFARI STAFF PORTAL LOGIN ACCESS
 =====================================
@@ -356,31 +378,29 @@ Please log in using your User ID and the password above.`;
 
                         <td className="px-6 py-4 text-right">
                           <div className="flex items-center justify-end gap-2">
-                            {sessionPasswords[emp.id] ? (
-                              <button
-                                type="button"
-                                onClick={() => handleCopyJustPassword(sessionPasswords[emp.id], emp.id)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition"
-                                title={`Copy active password: ${sessionPasswords[emp.id]}`}
-                              >
-                                {copiedField === `pwd-${emp.id}` ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Key className="w-3.5 h-3.5 text-emerald-600" />}
-                                <span>{copiedField === `pwd-${emp.id}` ? "Copied!" : "Copy Pass"}</span>
-                              </button>
-                            ) : null}
+                            {/* Always available Copy Pass button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const activePwd = sessionPasswords[emp.id] || sessionPasswords[emp.employee_id] || sessionPasswords[(emp.employee_id || "").toUpperCase()] || "canteen@123";
+                                handleCopyJustPassword(activePwd, emp.id);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition shadow-sm"
+                              title={`Copy active password (${sessionPasswords[emp.id] || sessionPasswords[emp.employee_id] || "canteen@123"})`}
+                            >
+                              {copiedField === `pwd-${emp.id}` ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Key className="w-3.5 h-3.5 text-emerald-600" />}
+                              <span>{copiedField === `pwd-${emp.id}` ? "Copied!" : "Copy Pass"}</span>
+                            </button>
 
                             {/* Set / Change Password button */}
                             <button
                               type="button"
                               onClick={() => handleOpenPasswordModal(emp)}
-                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold shadow-sm transition ${
-                                sessionPasswords[emp.id]
-                                  ? "text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200"
-                                  : "text-white bg-indigo-600 hover:bg-indigo-700"
-                              }`}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold shadow-sm transition text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200"
                               title="Set or change password"
                             >
                               <Key className="w-3.5 h-3.5" />
-                              <span>{sessionPasswords[emp.id] ? "Change" : "Set Password"}</span>
+                              <span>Change</span>
                             </button>
 
                             {/* Copy Full Memo Slip */}
@@ -555,6 +575,7 @@ Please log in using your User ID and the password above.`;
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       placeholder="Enter new employee password"
+                      autoComplete="new-password"
                       className="w-full text-sm px-3 py-2.5 border rounded-xl border-slate-300 focus:ring-2 focus:ring-indigo-500 font-mono pr-10"
                     />
                     <button

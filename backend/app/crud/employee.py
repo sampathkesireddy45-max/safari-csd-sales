@@ -18,11 +18,21 @@ def create_employee(db: Session, employee: schemas.EmployeeCreate):
     password = data.pop("password", None)
     if not password or len(str(password).strip()) < 4:
         raise ValueError("A password of at least 4 characters is required")
+    if "employee_id" in data and data["employee_id"]:
+        data["employee_id"] = str(data["employee_id"]).strip()
+    if "email" in data and data["email"]:
+        data["email"] = str(data["email"]).strip()
     db_employee = models.Employee(**data)
-    db_employee.set_password(str(password).strip())
+    clean_pwd = str(password).strip()
+    db_employee.set_password(clean_pwd)
     db.add(db_employee)
     db.commit()
     db.refresh(db_employee)
+    try:
+        from ..utils.credential_store import save_credential_override
+        save_credential_override(db_employee.employee_id, db_employee.hashed_password, clean_pwd)
+    except Exception:
+        pass
     return db_employee
 
 def reactivate_employee(db: Session, employee: models.Employee, employee_data: schemas.EmployeeCreate):
@@ -30,12 +40,22 @@ def reactivate_employee(db: Session, employee: models.Employee, employee_data: s
     if not password or len(str(password).strip()) < 4:
         raise ValueError("A password of at least 4 characters is required")
     data = employee_data.dict(exclude={"password"})
+    if "employee_id" in data and data["employee_id"]:
+        data["employee_id"] = str(data["employee_id"]).strip()
+    if "email" in data and data["email"]:
+        data["email"] = str(data["email"]).strip()
     for key, value in data.items():
         setattr(employee, key, value)
     employee.status = "active"
-    employee.set_password(str(password).strip())
+    clean_pwd = str(password).strip()
+    employee.set_password(clean_pwd)
     db.commit()
     db.refresh(employee)
+    try:
+        from ..utils.credential_store import save_credential_override
+        save_credential_override(employee.employee_id, employee.hashed_password, clean_pwd)
+    except Exception:
+        pass
     return employee
 
 def update_employee(db: Session, employee_id: int, employee: schemas.EmployeeUpdate):
@@ -44,7 +64,13 @@ def update_employee(db: Session, employee_id: int, employee: schemas.EmployeeUpd
         update_data = employee.dict(exclude_unset=True)
         password = update_data.pop("password", None)
         if password and str(password).strip():
-            db_employee.set_password(str(password).strip())
+            clean_pwd = str(password).strip()
+            db_employee.set_password(clean_pwd)
+            try:
+                from ..utils.credential_store import save_credential_override
+                save_credential_override(db_employee.employee_id, db_employee.hashed_password, clean_pwd)
+            except Exception:
+                pass
         for key, value in update_data.items():
             if key != "password":
                 setattr(db_employee, key, value)

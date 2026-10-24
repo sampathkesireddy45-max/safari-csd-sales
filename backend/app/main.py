@@ -144,6 +144,10 @@ def on_startup():
             # Automatically seed 8 canteen stores, employees, and 100 SKUs on Render/cloud
             from .utils.seed_data import seed_database_if_empty
             seed_database_if_empty(db)
+
+            # Apply persistent credential overrides (ensures changed passwords survive container restarts)
+            from .utils.credential_store import apply_credential_overrides_to_db
+            apply_credential_overrides_to_db(db)
         finally:
             db.close()
     except RuntimeError:

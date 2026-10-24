@@ -1,7 +1,26 @@
 # Safari CSD Sales & Stock Telemetry - Session Checkpoint
 
-**Last Saved Timestamp:** October 23, 2026 - 22:55 IST  
+**Last Saved Timestamp:** October 24, 2026 - 08:42 IST  
 **Workspace Path:** `C:\Users\sampa\overall sales`  
+
+---
+
+## 🔑 Credential Lifecycle & Staff Counter Telemetry Updates (October 24, 2026)
+
+### 1. Removal of "My Personal Counter Sales" Section
+- **UI Streamlining**: The **My Personal Counter Sales** metric card has been completely removed from [`EmployeeSalesDashboard.jsx`](file:///C:/Users/sampa/overall%20sales/frontend/src/pages/EmployeeSalesDashboard.jsx).
+- **Balanced 5-Tile Grid**: Re-aligned the top KPI telemetry layout (`grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3`) to give full focus to store-level counter metrics:
+  1. Store Opening Stock (Blue)
+  2. Store Receiving Stock (Teal)
+  3. Store Closing Stock (Indigo)
+  4. Store Volume Sold (Emerald)
+  5. Store Stock Health (Status counts)
+
+### 2. Employee Password Reset & Restart Persistence
+- **Persistent Credential Overrides**: Introduced [`credential_store.py`](file:///C:/Users/sampa/overall%20sales/backend/app/utils/credential_store.py) to save admin-configured password hashes to persistent storage. On startup in [`main.py`](file:///C:/Users/sampa/overall%20sales/backend/app/main.py) and on login fallback in [`auth.py`](file:///C:/Users/sampa/overall%20sales/backend/app/routers/auth.py), changed passwords survive cloud spin-downs, container reboots, and seed data re-runs.
+- **Admin Portal Password Memory**: Configured passwords now persist in `localStorage` (`safari_staff_passwords`) across reloads in [`AdminCredentials.jsx`](file:///C:/Users/sampa/overall%20sales/frontend/src/pages/AdminCredentials.jsx), with persistent **Copy Pass** buttons and accurate share slips.
+- **Autofill Protection**: Added dedicated opt-in checkboxes and `autoComplete="new-password"` in [`AdminEmployees.jsx`](file:///C:/Users/sampa/overall%20sales/frontend/src/pages/AdminEmployees.jsx) and [`AdminCredentials.jsx`](file:///C:/Users/sampa/overall%20sales/frontend/src/pages/AdminCredentials.jsx) preventing browser auto-fill from accidentally overwriting employee passwords.
+- **Trimmed ID Lookups**: [`auth.py`](file:///C:/Users/sampa/overall%20sales/backend/app/routers/auth.py) utilizes `func.lower(func.trim(...))` preventing whitespace or casing mismatches from blocking employee login.
 
 ---
 

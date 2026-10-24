@@ -764,13 +764,15 @@ def update_employee_opening_stock(
     }
 
 def _lookup_employee(db: Session, identifier: str) -> Employee | None:
-    if identifier.isdigit():
-        emp = crud.get_employee(db, employee_id=int(identifier))
+    ident = str(identifier).strip()
+    if ident.isdigit():
+        emp = crud.get_employee(db, employee_id=int(ident))
         if emp:
             return emp
     return db.query(Employee).filter(
-        (Employee.employee_id == identifier) |
-        (func.lower(Employee.employee_id) == identifier.lower())
+        (Employee.employee_id == ident) |
+        (func.lower(func.trim(Employee.employee_id)) == ident.lower()) |
+        (func.lower(func.trim(Employee.email)) == ident.lower())
     ).first()
 
 @router.get("/{employee_id}", response_model=schemas.Employee)
@@ -818,6 +820,11 @@ def admin_reset_password(
     emp.status = "active"
     db.commit()
     db.refresh(emp)
+
+    # Persist credential override to ensure survival across container reboots
+    from ..utils.credential_store import save_credential_override
+    save_credential_override(emp.employee_id, emp.hashed_password, clean_pwd)
+
     return {
         "status": "success",
         "message": f"Password updated successfully for employee {emp.employee_id} ({emp.name})",
